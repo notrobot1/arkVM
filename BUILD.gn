@@ -1,0 +1,386 @@
+import("//build/ohos.gni")
+
+print("is_ohos=$is_ohos current_os=$current_os target_os=$target_os shlib_extension=$shlib_extension")
+
+_ipc = "//foundation/communication/ipc/interfaces/innerkits/ipc_single:ipc_single"
+#_utils = "//commonlibrary/c_utils/base:utils"
+_tc = "//build/toolchain/ohos:ohos_clang_x86_64"
+
+
+
+
+ohos_executable("display_probe") {
+  sources = [ "display_probe.cpp" ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "hdf_core:libhdi",
+    "hdf_core:libhdf_utils",
+    "drivers_interface_display:libdisplay_composer_hdi_impl_1.5",
+    "drivers_interface_display:libdisplay_composer_proxy_1.5",
+  ]
+subsystem_name = "hdf"
+  part_name = "drivers_peripheral_display"
+
+}
+
+ohos_executable("display_paint") {
+  sources = [ "display_paint.cpp" ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "hdf_core:libhdi",
+    "hdf_core:libhdf_utils",
+    "drivers_interface_display:libdisplay_composer_hdi_impl_1.5",
+    "drivers_interface_display:libdisplay_composer_proxy_1.5",
+    "drivers_interface_display:libdisplay_buffer_hdi_impl",
+    "drivers_interface_display:libdisplay_buffer_proxy_1.0",
+  ]
+  subsystem_name = "hdf"
+  part_name = "drivers_peripheral_display"
+}
+
+
+ohos_shared_library("arkvm_test_sa") {
+  sources = [ "arkvm_test_sa.cpp" ]
+  deps = [
+    "//foundation/systemabilitymgr/safwk/interfaces/innerkits/safwk:system_ability_fwk",
+  ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "samgr:samgr_proxy",
+  ]
+  install_enable = false
+  part_name = "safwk"
+  subsystem_name = "systemabilitymgr"
+}
+ohos_executable("arkvm_param_service") {
+  sources = ["init_stubs.c", "param_service.cpp" ]
+ 
+
+  include_dirs = [
+    "//base/startup/init/interfaces/innerkits/include",
+    "//base/startup/init/interfaces/innerkits/init_module_engine/include",
+    "//base/startup/init/services/init/include",
+    "//base/startup/init/services/modules/init_hook",
+    "//base/startup/init/services/param/include",
+  ]
+
+  deps = [
+
+    "//base/startup/init/interfaces/innerkits:libbegetutil",
+    "//base/startup/init/services/log:init_log",
+    "//base/startup/init/services/param/base:param_base",
+    "//base/startup/init/services/param/linux:param_init",
+    "//base/startup/init/services/utils:libinit_utils",
+  ]
+  external_deps = [ "cJSON:cjson","hilog:libhilog" ]
+
+  install_enable = false
+  part_name = "init" 
+  subsystem_name = "startup"
+
+}
+
+
+
+
+ohos_executable("arkvm_token_init") {
+  sources = [ "token_init.cpp" ]
+  external_deps = [ "access_token:libnativetoken","access_token:libtoken_setproc" ]
+  install_enable = false
+  part_name = "ipc"
+  subsystem_name = "communication"
+}
+ohos_executable("sa_main") {
+  sources = [ "//foundation/systemabilitymgr/safwk/services/safwk/src/main.cpp" ]
+
+  include_dirs = [
+    "//foundation/systemabilitymgr/safwk/services/safwk/include",
+    "//foundation/systemabilitymgr/safwk/interfaces/innerkits/safwk",
+  ]
+
+  #  ^~ ^`                      ^c   ^b    ^i ^q system_ability_fwk_rust  ^`^t        ^o     ^c      ^o  ^a   ^`     ^a    
+  #      Rust.  ^u ^q  ^a     ^`        ^k ^g   ^a   ^o   ^b    ^c ^b ^l     ^e   ^a ^b     ^k      ^` ^b   ^d     ^b         ^`   ^a ^g ^q ^b       
+  #  ^b ^c   ^g             ^c       ^g       ^n            ^h                ^b ^a ^o.      ^`     ^a          Rust  ^c      ^a      ^b.
+  #deps = [ _ipc ]
+   deps = [
+    "//foundation/systemabilitymgr/safwk/interfaces/innerkits/safwk:system_ability_fwk",
+  ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "init:libbegetutil",
+    "ipc:ipc_single",
+    "json:nlohmann_json_static",
+    "samgr:samgr_common",
+  ]
+
+  ldflags = [ "-rdynamic" ]
+
+  install_enable = false
+    part_name = "safwk"
+  subsystem_name = "systemabilitymgr" 
+}
+
+
+ohos_executable("ipc_test_server") {
+  sources = [ "ipc_test_server.cpp" ]
+  deps = [
+    "//foundation/communication/ipc/interfaces/innerkits/ipc_single:ipc_single",
+  ]
+
+  external_deps = [ "c_utils:utils", "samgr:samgr_proxy" ]
+  install_enable = false
+  part_name = "ipc"
+  subsystem_name = "communication"
+}
+
+ohos_executable("ipc_test_client") {
+  sources = [ "ipc_test_client.cpp" ]
+  deps = [
+    "//foundation/communication/ipc/interfaces/innerkits/ipc_single:ipc_single",
+
+  ]
+  external_deps = [ "c_utils:utils", "samgr:samgr_proxy" ]
+  install_enable = false
+  part_name = "ipc"
+  subsystem_name = "communication"
+}
+
+
+ohos_executable("musl_hello") {
+  sources = [ "musl_hello.cpp" ]
+  install_enable = false
+  part_name = "ipc"
+  subsystem_name = "communication"
+}
+ 
+group("arkui_component_modules") {
+  deps = [
+    "//foundation/arkui/ace_engine/build:libace_compatible_components",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_button",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_containerreader",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_dynamiclayout",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_counter",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_datapanel",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_gauge",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_hyperlink",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_textclock",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_checkbox",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_patternlock",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_qrcode",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_rating",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_waterflow",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_lazywaterflowlayout",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_linearsplit",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_sidebar",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_marquee",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_search",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_stepper",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_radio",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_slider",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_timepicker",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_calendarpicker",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_indexer",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_symbol",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_richeditor",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_menu",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_lazycolumnlayout",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_toggle",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_dialog",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_imageanimator",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_datepicker",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_textpicker",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_select",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_bubble",
+    "//foundation/arkui/ace_engine/adapter/ohos/build:arkui_folderstack",
+  ]
+}
+group("all") {
+  deps = [
+    "$_ipc($_tc)",
+    "//foundation/systemabilitymgr/samgr/services/samgr/native:samgr($_tc)",
+    ":musl_hello($_tc)",
+    ":ipc_test_server($_tc)",
+    ":ipc_test_client($_tc)",
+    ":samgr_client($_tc)",
+    ":sa_main($_tc)",
+    ":arkvm_test_sa($_tc)",
+    "//base/security/access_token/services/accesstokenmanager:accesstoken_manager_service($_tc)",
+    "//base/hiviewdfx/hilog/services/hilogd:hilogd($_tc)",
+    "//base/hiviewdfx/hilog/services/hilogtool:hilog($_tc)",
+    "//base/security/access_token/services/common/json_parse:accesstoken_json_parse($_tc)",
+    "//foundation/bundlemanager/bundle_framework/services/bundlemgr:libbms($_tc)",
+    "//foundation/bundlemanager/bundle_framework/services/bundlemgr:installs($_tc)",
+    "//foundation/bundlemanager/bundle_tool/frameworks:bm($_tc)",
+    ":arkvm_token_init($_tc)",
+    ":arkvm_param_service($_tc)",
+    "//base/startup/init/services/begetctl:param",
+    "//base/account/os_account/services/accountmgr:accountmgr",
+    "//foundation/filemanagement/storage_service/services/storage_manager:storage_manager",
+    "//foundation/filemanagement/storage_service/services/storage_daemon:storage_daemon",
+        "//base/account/os_account/tools/acm:acm",
+     "//foundation/ability/ability_runtime/services/abilitymgr:abilityms",
+    "//foundation/ability/ability_runtime/services/appmgr:libappms",
+    "//foundation/ability/ability_runtime/services/dataobsmgr:dataobsms",
+    "//foundation/bundlemanager/bundle_tool/frameworks:bundle_test_tool",
+    "//foundation/bundlemanager/bundle_framework/services/bundlemgr:libbms_exception_wrapper",
+    "//base/startup/appspawn/standard:appspawn",
+    "//foundation/ability/ability_runtime/tools/aa:aa",
+    "//base/startup/appspawn/modules/common:appspawn_common",
+    "//base/startup/appspawn/modules/ace_adapter:appspawn_ace",
+    "//base/startup/appspawn/modules/sandbox:appspawn_sandbox",
+    "//base/startup/appspawn/modules/sysevent:event_reporter",
+    "//base/notification/common_event_service/services:cesfwk_services",
+    "//foundation/ability/ability_runtime/services/abilitymgr:mission_list",
+    "//foundation/ability/ability_runtime/services/abilitymgr:ams_service_config",
+    "//base/startup/appspawn/modules/module_engine:libappspawn_stub_empty",
+    "//arkcompiler/ets_runtime/ecmascript/compiler:stub.an",
+    "//base/startup/appspawn/etc:etc_files",
+    "//foundation/ability/ability_runtime/frameworks/js/napi:napi_packages",
+    "//base/hiviewdfx/hilog/interfaces/js/kits/napi:libhilognapi",
+    "//third_party/libdrm:libdrm",
+    "//drivers/peripheral/display:display_entry",
+        "//drivers/hdf_core/adapter/uhdf2/manager:hdf_devmgr",
+    "//drivers/peripheral/devhost/host:hdf_devhost",
+    ":display_probe",
+    ":display_paint",
+    "//foundation/graphic/graphic_2d/rosen/modules/render_service:render_service",
+    "//foundation/window/window_manager/wmserver:libwms",
+"//foundation/window/window_manager/interfaces/kits/napi/window_runtime:window_napi",
+"//foundation/window/window_manager/interfaces/kits/napi/window_runtime/window_stage_napi:windowstage",
+"//foundation/window/window_manager/interfaces/kits/napi/display_runtime:display_napi",
+"//foundation/arkui/ace_engine/interfaces/inner_api/ace:ace_uicontent",
+"//foundation/arkui/ace_engine/interfaces/inner_api/ace:ace_forward_compatibility",
+"//foundation/arkui/ace_engine/build:libace_compatible",
+"//foundation/arkui/ace_engine/interfaces/napi/kits/drawabledescriptor:drawabledescriptor",
+"//base/security/access_token/frameworks/js/napi/accesstoken:libabilityaccessctrl",
+"//third_party/mesa3d:zink_opengl",
+"//foundation/resourceschedule/qos_manager/frameworks/native:qos_ndk",
+"//third_party/vulkan-loader:vulkan_loader",
+"//foundation/graphic/graphic_2d/rosen/samples/2d_graphics:drawing_sample_rs",
+"//foundation/multimodalinput/input:multimodalinput_mmi_service",
+"//foundation/multimodalinput/input:multimodalinput_mmi_frameworks",
+"//foundation/multimodalinput/input:multimodalinput_mmi_base",
+"//foundation/multimedia/image_framework/plugins/common/libs:multimediaplugin",
+"//foundation/arkui/ace_engine/interfaces/napi/kits:napi_group",
+"//foundation/filemanagement/file_api/interfaces/kits/js:fs",
+"//base/global/system_resources/systemres:systemres_hap",
+    ":arkui_component_modules",
+ "//base/startup/init/services/param/watcher:param_watcher",
+    "//base/inputmethod/imf/services:inputmethod_service",
+    "//applications/standard/hap:sceneboard_hap",
+    "//foundation/window/window_manager/etc:wms_etc",
+"//foundation/window/window_manager/window_scene/screen_session_manager:screen_session_manager",
+"//foundation/window/window_manager/window_scene/session_manager:scene_session_manager",
+"//foundation/window/window_manager/window_scene/session_manager:session_manager",
+"//foundation/window/window_manager/window_scene/session_manager:session_manager_lite",
+"//foundation/window/window_manager/window_scene/session_manager_service:session_manager_service",
+    "//foundation/distributeddatamgr/datamgr_service/services/distributeddataservice/app:distributeddataservice",
+    "//commonlibrary/ets_utils/js_sys_module/process:process",
+    "//base/hiviewdfx/hitrace/interfaces/js/kits/napi:hitracemeter_napi",
+    "//foundation/window/window_manager/window_scene/interfaces/kits/napi/scene_session_manager:scenesessionmanager_napi",
+    "//base/time/time_service/framework/js/napi/system_date_time:systemdatetime",
+    "//commonlibrary/ets_utils/js_util_module/util:util",
+    "//commonlibrary/ets_utils/js_util_module/json:json",
+    "//commonlibrary/ets_utils/js_util_module/stream:stream",
+    "//commonlibrary/ets_utils/js_util_module/collections:collections",
+    "//commonlibrary/ets_utils/js_concurrent_module/taskpool:taskpool",
+    "//commonlibrary/ets_utils/js_concurrent_module/worker:worker",
+    "//commonlibrary/ets_utils/js_concurrent_module/utils:utils",
+    "//commonlibrary/ets_utils/js_sys_module/timer:timer",
+    "//commonlibrary/ets_utils/js_sys_module/console:console",
+    "//commonlibrary/ets_utils/js_sys_module/dfx:dfx",
+    "//commonlibrary/ets_utils/js_api_module/uri:uri",
+    "//commonlibrary/ets_utils/js_api_module/url:url",
+    "//commonlibrary/ets_utils/js_api_module/buffer:buffer",
+    "//commonlibrary/ets_utils/js_api_module/xml:xml",
+    "//commonlibrary/ets_utils/js_api_module/convertxml:convertxml",
+    "//base/startup/init/interfaces/kits/jskits:systemparameter",
+    "//foundation/filemanagement/file_api/interfaces/kits/js:fileio",
+    "//foundation/filemanagement/app_file_service/interfaces/kits/js:fileuri",
+
+    "//foundation/ability/ability_runtime/frameworks/native/ability/native:service_extension_module",
+    "//foundation/ability/ability_runtime/frameworks/native/ability/native:ui_extension_module",
+    "//foundation/ability/ability_runtime/frameworks/native/ability/native:form_extension_module",
+    "//foundation/ability/ability_runtime/frameworks/js/napi/service_extension_ability:serviceextensionability",
+    "//foundation/ability/ability_runtime/frameworks/js/napi/service_extension_ability:serviceextensionability_napi",
+
+
+    "//base/startup/init/interfaces/kits/jskits:deviceinfo",
+    "//base/startup/init/interfaces/kits/jskits:systemparameterenhance",
+    "//base/global/i18n/interfaces/js/kits:i18n",
+    "//base/hiviewdfx/hitrace/interfaces/js/kits/napi:hitracechain_napi",
+    "//foundation/multimedia/audio_framework/frameworks/js/napi:audio",
+    "//base/account/os_account/interfaces/kits/napi/osaccount:osaccount",
+    "//foundation/multimodalinput/input/frameworks/napi/input_monitor:inputmonitor",
+    "//foundation/multimodalinput/input/frameworks/napi/key_code:keycode",
+    "//foundation/multimodalinput/input/frameworks/napi/key_event:keyevent",
+    "//commonlibrary/ets_utils/js_util_module/container:container_packages",
+
+    "//applications/standard/settings/napi/settings:settings",
+    "//base/notification/common_event_service/interfaces/kits/napi/napi_common_event:commoneventmanager",
+    "//base/theme/screenlock_mgr/frameworks/js/napi:screenlock",
+
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/bundle_manager:bundlemanager",
+    "//base/notification/common_event_service/interfaces/kits/napi/common_event:commonevent",
+    "//foundation/distributeddatamgr/preferences/frameworks/js/napi/preferences:preferences",
+    "//base/hiviewdfx/hisysevent/interfaces/js/kits/napi:hisysevent_napi",
+    "//foundation/multimedia/image_framework/interfaces/kits/js/common:image",
+    "//foundation/resourceschedule/work_scheduler/interfaces/kits/js:workscheduler",
+
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/bundle_resource:bundleresourcemanager",
+    "//base/customization/config_policy/interfaces/kits/js:configpolicy",
+    "//foundation/distributeddatamgr/relational_store/frameworks/js/napi/relationalstore:relationalstore",
+    "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/effect_kit:effectkit",
+    "//base/theme/wallpaper_mgr/frameworks/js/napi:wallpaper",
+
+]
+}
+
+ohos_executable("samgr_client") {
+  sources = [ "samgr_client.cpp" ]
+  deps = [ _ipc, ]
+  external_deps = [
+    "c_utils:utils",
+    "samgr:samgr_proxy",
+  ]
+  install_enable = false
+  part_name = "ipc"
+  subsystem_name = "communication"
+}
+
+
+
+#group("all") {
+#  deps = [
+##    "//foundation/arkui/ace_engine/build:libace_compatible",
+##    "//arkcompiler/ets_runtime:libark_jsruntime",
+##    "//foundation/window/window_manager/previewer:previewer_window",
+##    "//foundation/graphic/graphic_2d/rosen/modules/glfw_render_context:libglfw_render_context",
+##    ":arkui_button",
+##    "//foundation/communication/ipc/interfaces/innerkits/ipc_single:ipc_single($host_toolchain)",
+#    "//foundation/communication/ipc/interfaces/innerkits/ipc_single:ipc_single(//build/toolchain/ohos:ohos_clang_x86_64)",
+
+
+  #]
+#}
+
+# Same as adapter/ohos/build/BUILD.gn does per component, but without importing
+# the device config.gni, which drags in ace_ohos_standard_entrance and with it
+# safwk, samgr, ipc and the rest of the on-device stack.
+#ohos_shared_library("arkui_button") {
+#  deps = [
+#    "//foundation/arkui/ace_engine/frameworks/core/components_ng/pattern/button:ace_core_components_button_pattern_ng_linux",
+#    "//foundation/arkui/ace_engine/build:libace_compatible",
+#    "//foundation/arkui/ace_engine/frameworks/core:ace_container_scope",
+#  ]
+#  part_name = "ace_engine"
+#  subsystem_name = "arkui"
+#}
+
