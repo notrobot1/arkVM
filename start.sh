@@ -346,7 +346,8 @@ EOF
         libdeviceinfo.z.so libsystemparameterenhance.z.so \
         libi18n.z.so libhitracechain_napi.z.so \
         libsettings.z.so libcommoneventmanager.z.so libscreenlock.z.so\
-        libcommonevent.z.so libhisysevent_napi.z.so
+        libcommonevent.z.so libhisysevent_napi.z.so\
+        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so
 
     echo "модули NAPI: звук, учётные записи, ввод"
     copy_out "$LIB/module/multimedia"      libaudio.z.so libimage_napi.z.so
@@ -361,11 +362,12 @@ EOF
         liblightweightmap.z.so liblightweightset.z.so libplainarray.z.so
 
 
-    copy_out "$LIB/module/bundle"          libbundlemanager.z.so
-    copy_out "$LIB/module/data"            libpreferences.z.so
+    #copy_out "$LIB/module/bundle"          libbundlemanager.z.so
+    #copy_out "$LIB/module/data"            libpreferences.z.so
     #copy_out "$LIB/module/multimedia"      libimage.z.so
     copy_out "$LIB/module/resourceschedule" libworkscheduler.z.so
-
+    copy_out "$LIB/module/bundle" libbundlemanager.z.so libbundleresourcemanager.z.so
+    copy_out "$LIB/module/data"   libpreferences.z.so librelationalstore.z.so
     echo "готово"
 }
 
