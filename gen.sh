@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -e
+cd /home/openharmony
+
+./build.sh --product-name arkvm --skip-partlist-check --build-only-load
+
+mkdir -p out/arkvm
+rm -rf out/arkvm/build_configs
+cp -r out/sdk/build_configs out/arkvm/
+
+prebuilts/build-tools/linux-x86/bin/gn gen out/arkvm \
+  --dotfile=.gn-arkvm \
+  --root-target=//arkvm:all \
+  --args='
+    product_name="arkvm"
+    is_standard_system=true
+    product_path="/home/openharmony/productdefine/common/products"
+    product_config_path="/home/openharmony/productdefine/common/products"
+    device_name="sdk"
+    device_path="/home/openharmony/device/board/ohos/sdk"
+    device_config_path="/home/openharmony/device/board/ohos/sdk"
+    build_ohos_sdk=false
+    build_ohos_ndk=false
+    ohos_build_type="debug"
+    build_variant="root"
+    runtime_mode="release"
+
+    bundle_framework_graphics=false
+    bundle_framework_free_install=false
+    code_signature_enable=false
+    code_encryption_enable=false
+    bundle_framework_default_app=false
+    bundle_framework_launcher=false
+    bundle_framework_sandbox_app=false
+    bundle_framework_quick_fix=false
+    bundle_framework_app_control=false
+    bundle_framework_overlay_install=false
+    bundle_framework_bundle_resource=false
+    distributed_bundle_framework=false
+    device_usage_statistics_enabled=false
+    udmf_enabled=false
+    webview_enable=false
+    runtime_core_enable_codegen=false
+    app_domain_verify_enabled=false
+    user_auth_framework_impl_enabled=false
+    api_metrics_enable=false
+    bms_device_info_manager_part_enabled=false
+    window_enable=false
+    storage_service_enable=true
+    ability_runtime_no_screen=false
+    drivers_peripheral_display_vdi_default=true
+drivers_peripheral_display_community=true
+ace_engine_feature_enable_accessibility=true
+graphic_2d_feature_ace_enable_gpu=true
+graphic_2d_feature_rs_enable_uni_render=true
+graphic_2d_feature_rs_enable_eglimage=true
+input_feature_keyboard=true
+input_feature_combination_key=true
+    window_manager_use_sceneboard=true
+  '
