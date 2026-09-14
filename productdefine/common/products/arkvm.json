@@ -183,7 +183,9 @@
         { "component": "hdc" },
         { "component": "hiperf" },
         { "component": "syscap_codec" },
-        { "component": "hiprofiler", "features":["hiprofiler_SmartPerf=false"] }
+        { "component": "hiprofiler", "features":["hiprofiler_SmartPerf=false"] },
+        { "component": "ace_ets2bundle" },
+        { "component": "packing_tool" }
       ]
     },
     {
@@ -211,7 +213,8 @@
         { "component": "faultloggerd" },
         { "component": "hitrace" },
         { "component": "hicollie" },
-        { "component": "hiviewdfx_cangjie_wrapper" }
+        { "component": "hiviewdfx_cangjie_wrapper" },
+        { "component": "api_metrics" }
       ]
     },
     {
@@ -431,7 +434,8 @@
           ]
         },
         { "component": "media_library" },
-        { "component": "av_session" }
+        { "component": "av_session" },
+        { "component": "camera_framework" }
       ]
     },
     {
@@ -566,13 +570,6 @@
       "subsystem": "sdk",
       "components": [
         { "component": "sdk" }
-      ]
-    },
-    {
-      "subsystem": "developtools",
-      "components": [
-        { "component": "ace_ets2bundle" },
-        { "component": "packing_tool" }
       ]
     },
     {
