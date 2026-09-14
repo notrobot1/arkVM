@@ -130,6 +130,8 @@ ensure_dirs() {
     chmod 666 /dev/input/* /dev/uinput 2>/dev/null
     mkdir -p "$LIB"/module/{multimedia,account,multimodalinput}
     mkdir -p "$LIB"/module/{bundle,data,resourceschedule}
+    mkdir -p "$LIB"/module/app/form
+
 }
 
 
@@ -261,7 +263,8 @@ EOF
         libtaskpool.z.so libworker.z.so libutils.z.so \
         libtimer.z.so libconsole.z.so libdfx.z.so \
         liburi.z.so liburl.z.so libbuffer.z.so libxml.z.so libconvertxml.z.so \
-        libfileio.z.so
+        libfileio.z.so \
+        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so
 
     echo "модули NAPI: файлы"
     copy_out "$LIB/module/file" libfs.z.so libfileuri.z.so
@@ -368,6 +371,25 @@ EOF
     copy_out "$LIB/module/resourceschedule" libworkscheduler.z.so
     copy_out "$LIB/module/bundle" libbundlemanager.z.so libbundleresourcemanager.z.so
     copy_out "$LIB/module/data"   libpreferences.z.so librelationalstore.z.so
+
+    copy_out "$LIB/module/bundle" libbundlemanager.z.so libbundleresourcemanager.z.so
+    copy_out "$LIB/module/data"   libpreferences.z.so librelationalstore.z.so
+
+    echo "менеджер пакетов"
+    copy_out "$LIB" libbms.z.so
+
+    echo "модули NAPI: питание, уведомления, пакеты"
+    copy_out "$LIB/module" \
+        libpower.z.so libthermal.z.so libnotificationmanager.z.so libbundle.z.so
+
+    copy_out "$LIB/module/bundle" \
+        libbundlemanager.z.so libbundleresourcemanager.z.so \
+        libbundlemonitor.z.so libinstaller.z.so \
+        liblauncherbundlemanager.z.so libshortcutmanager.z.so
+
+    copy_out "$LIB/module/app/form" libformhost.z.so
+
+
     echo "готово"
 }
 
