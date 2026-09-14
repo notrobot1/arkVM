@@ -1,3 +1,4 @@
+cat ./arkvm/BUILD.gn                                                              
 import("//build/ohos.gni")
 
 print("is_ohos=$is_ohos current_os=$current_os target_os=$target_os shlib_extension=$shlib_extension")
@@ -60,7 +61,7 @@ ohos_shared_library("arkvm_test_sa") {
 }
 ohos_executable("arkvm_param_service") {
   sources = ["init_stubs.c", "param_service.cpp" ]
- 
+
 
   include_dirs = [
     "//base/startup/init/interfaces/innerkits/include",
@@ -81,7 +82,7 @@ ohos_executable("arkvm_param_service") {
   external_deps = [ "cJSON:cjson","hilog:libhilog" ]
 
   install_enable = false
-  part_name = "init" 
+  part_name = "init"
   subsystem_name = "startup"
 
 }
@@ -104,8 +105,8 @@ ohos_executable("sa_main") {
     "//foundation/systemabilitymgr/safwk/interfaces/innerkits/safwk",
   ]
 
-  #  ^~ ^`                      ^c   ^b    ^i ^q system_ability_fwk_rust  ^`^t        ^o     ^c      ^o  ^a   ^`     ^a    
-  #      Rust.  ^u ^q  ^a     ^`        ^k ^g   ^a   ^o   ^b    ^c ^b ^l     ^e   ^a ^b     ^k      ^` ^b   ^d     ^b         ^`   ^a ^g ^q ^b       
+  #  ^~ ^`                      ^c   ^b    ^i ^q system_ability_fwk_rust  ^`^t        ^o     ^c      ^o  ^a   ^`     ^a
+  #      Rust.  ^u ^q  ^a     ^`        ^k ^g   ^a   ^o   ^b    ^c ^b ^l     ^e   ^a ^b     ^k      ^` ^b   ^d     ^b         ^`   ^a ^g ^q ^b
   #  ^b ^c   ^g             ^c       ^g       ^n            ^h                ^b ^a ^o.      ^`     ^a          Rust  ^c      ^a      ^b.
   #deps = [ _ipc ]
    deps = [
@@ -124,7 +125,7 @@ ohos_executable("sa_main") {
 
   install_enable = false
     part_name = "safwk"
-  subsystem_name = "systemabilitymgr" 
+  subsystem_name = "systemabilitymgr"
 }
 
 
@@ -159,7 +160,7 @@ ohos_executable("musl_hello") {
   part_name = "ipc"
   subsystem_name = "communication"
 }
- 
+
 group("arkui_component_modules") {
   deps = [
     "//foundation/arkui/ace_engine/build:libace_compatible_components",
@@ -340,13 +341,23 @@ group("all") {
     "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/effect_kit:effectkit",
     "//base/theme/wallpaper_mgr/frameworks/js/napi:wallpaper",
 
-"//foundation/distributeddatamgr/data_share/frameworks/js/napi/dataShare:datashare",
+    "//foundation/distributeddatamgr/data_share/frameworks/js/napi/dataShare:datashare",
 "//foundation/distributeddatamgr/data_share/frameworks/js/napi/dataShare:datasharepredicates",
 "//foundation/multimodalinput/input/frameworks/napi/input_consumer:inputconsumer",
 "//foundation/window/window_manager/window_scene/interfaces/kits/napi/screen_session_manager:screensessionmanager_napi",
-"//developtools/profiler/hidebug/interfaces/js/kits/napi:hidebug",
-"//foundation/multimedia/camera_framework/interfaces/kits/js/camera_napi:camera_napi",
+#"//developtools/profiler/hidebug/interfaces/js/kits/napi:hidebug",
+#"//foundation/multimedia/camera_framework/interfaces/kits/js/camera_napi:camera_napi",
+    "//foundation/barrierfree/accessibility/interfaces/kits/napi:accessibility_napi",
 
+    "//base/powermgr/power_manager/frameworks/napi/power:power",
+    "//base/powermgr/thermal_manager/frameworks/napi:thermal",
+    "//base/notification/distributed_notification_service/frameworks/js/napi/src/manager:notificationmanager",
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/bundlemgr:bundle",
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/bundle_monitor:bundlemonitor",
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/installer:installer",
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/launcher_bundle_manager:launcherbundlemanager",
+    "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/shortcut_manager:shortcutmanager",
+    "//foundation/ability/form_fwk/frameworks/js/napi:formhost",
 ]
 }
 
@@ -390,4 +401,3 @@ ohos_executable("samgr_client") {
 #  part_name = "ace_engine"
 #  subsystem_name = "arkui"
 #}
-
