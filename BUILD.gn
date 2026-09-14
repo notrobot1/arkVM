@@ -340,6 +340,13 @@ group("all") {
     "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/effect_kit:effectkit",
     "//base/theme/wallpaper_mgr/frameworks/js/napi:wallpaper",
 
+"//foundation/distributeddatamgr/data_share/frameworks/js/napi/dataShare:datashare",
+"//foundation/distributeddatamgr/data_share/frameworks/js/napi/dataShare:datasharepredicates",
+"//foundation/multimodalinput/input/frameworks/napi/input_consumer:inputconsumer",
+"//foundation/window/window_manager/window_scene/interfaces/kits/napi/screen_session_manager:screensessionmanager_napi",
+"//developtools/profiler/hidebug/interfaces/js/kits/napi:hidebug",
+"//foundation/multimedia/camera_framework/interfaces/kits/js/camera_napi:camera_napi",
+
 ]
 }
 
