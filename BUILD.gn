@@ -1,4 +1,3 @@
-cat ./arkvm/BUILD.gn                                                              
 import("//build/ohos.gni")
 
 print("is_ohos=$is_ohos current_os=$current_os target_os=$target_os shlib_extension=$shlib_extension")
@@ -358,6 +357,19 @@ group("all") {
     "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/launcher_bundle_manager:launcherbundlemanager",
     "//foundation/bundlemanager/bundle_framework/interfaces/kits/js/shortcut_manager:shortcutmanager",
     "//foundation/ability/form_fwk/frameworks/js/napi:formhost",
+
+    "//foundation/window/window_manager/window_scene/interfaces/kits/napi/session_manager_service:sessionmanagerservice_napi",
+    "//foundation/window/window_manager/window_scene/interfaces/kits/napi/transaction_manager:transactionmanager_napi",
+    "//base/powermgr/battery_manager/frameworks/napi:batteryinfo",
+    "//base/notification/eventhandler/frameworks/napi:emitter",
+    "//base/inputmethod/imf/frameworks/js/napi/inputmethodclient:inputmethod",
+    "//base/global/i18n/interfaces/js/kits:intl",
+    "//base/notification/distributed_notification_service/frameworks/js/napi/src/subscribe:notificationsubscribe",
+    "//base/time/time_service/framework/js/napi/system_timer:systemtimer",
+    "//base/sensors/miscdevice/frameworks/js/napi:vibrator",
+    "//foundation/ability/form_fwk/frameworks/js/napi:forminfo",
+    "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/hyper_graphic_manager:libhgmnapi",
+    "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/drawing:drawing_napi",
 ]
 }
 
