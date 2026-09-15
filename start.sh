@@ -131,7 +131,7 @@ ensure_dirs() {
     mkdir -p "$LIB"/module/{multimedia,account,multimodalinput}
     mkdir -p "$LIB"/module/{bundle,data,resourceschedule}
     mkdir -p "$LIB"/module/app/form
-
+    mkdir -p "$LIB"/module/events
 }
 
 
@@ -264,7 +264,10 @@ EOF
         libtimer.z.so libconsole.z.so libdfx.z.so \
         liburi.z.so liburl.z.so libbuffer.z.so libxml.z.so libconvertxml.z.so \
         libfileio.z.so \
-        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so
+        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so \
+        libbatteryinfo.z.so libinputmethod.z.so libintl.z.so \
+        libnotificationsubscribe.z.so libsystemtimer.z.so libvibrator.z.so \
+        libhgmnapi.z.so
 
     echo "модули NAPI: файлы"
     copy_out "$LIB/module/file" libfs.z.so libfileuri.z.so
@@ -350,7 +353,8 @@ EOF
         libi18n.z.so libhitracechain_napi.z.so \
         libsettings.z.so libcommoneventmanager.z.so libscreenlock.z.so\
         libcommonevent.z.so libhisysevent_napi.z.so\
-        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so
+        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so \
+        libsessionmanagerservice_napi.z.so libtransactionmanager_napi.z.so
 
     echo "модули NAPI: звук, учётные записи, ввод"
     copy_out "$LIB/module/multimedia"      libaudio.z.so libimage_napi.z.so
@@ -389,6 +393,10 @@ EOF
 
     copy_out "$LIB/module/app/form" libformhost.z.so
 
+
+    copy_out "$LIB/module/events"   libemitter.z.so
+    copy_out "$LIB/module/graphics" libdisplaysync.z.so libdrawing_napi.z.so
+    copy_out "$LIB/module/app/form" libformhost.z.so libforminfo.z.so
 
     echo "готово"
 }
