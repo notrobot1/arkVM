@@ -1,0 +1,12 @@
+{
+    "install_list" : [
+        {
+            "app_dir" : "/system/app/SceneBoard",
+            "removable" : false
+        },
+        {
+            "app_dir" : "/system/app/ohos.global.systemres",
+            "removable" : false
+        }
+    ]
+}
