@@ -370,6 +370,10 @@ group("all") {
     "//foundation/ability/form_fwk/frameworks/js/napi:forminfo",
     "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/hyper_graphic_manager:libhgmnapi",
     "//foundation/graphic/graphic_2d/interfaces/kits/napi/graphic/drawing:drawing_napi",
+    "//foundation/distributeddatamgr/udmf/interfaces/jskits:uniformtypedescriptor_napi",
+    "//foundation/distributeddatamgr/udmf/interfaces/jskits:unifieddatachannel_napi",
+"//foundation/multimedia/image_framework/interfaces/kits/js/common:image_napi",
+
 ]
 }
 
