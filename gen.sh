@@ -25,17 +25,17 @@ prebuilts/build-tools/linux-x86/bin/gn gen out/arkvm \
     build_variant="root"
     runtime_mode="release"
 
-    bundle_framework_graphics=false
+    bundle_framework_graphics=true
     bundle_framework_free_install=false
     code_signature_enable=false
     code_encryption_enable=false
     bundle_framework_default_app=false
-    bundle_framework_launcher=false
+    bundle_framework_launcher=true
     bundle_framework_sandbox_app=false
     bundle_framework_quick_fix=false
     bundle_framework_app_control=false
     bundle_framework_overlay_install=false
-    bundle_framework_bundle_resource=false
+    bundle_framework_bundle_resource=true
     distributed_bundle_framework=false
     device_usage_statistics_enabled=false
     udmf_enabled=false
