@@ -23,6 +23,8 @@ OUT=${OUT:-$TREE/out/arkvm}
 
 export LD_LIBRARY_PATH=/system/lib64:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough
 
+#export LD_LIBRARY_PATH=/system/lib64:/system/lib64/module/multimedia:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough
+
 SAMGR_CLIENT=$BIN/samgr_client
 SA_MAIN=$BIN/sa_main
 
@@ -357,7 +359,7 @@ EOF
         libsessionmanagerservice_napi.z.so libtransactionmanager_napi.z.so
 
     echo "модули NAPI: звук, учётные записи, ввод"
-    copy_out "$LIB/module/multimedia"      libaudio.z.so libimage_napi.z.so
+    copy_out "$LIB/module/multimedia"      libaudio.z.so
     copy_out "$LIB/module/account"         libosaccount.z.so
     copy_out "$LIB/module/multimodalinput" libinputmonitor.z.so libkeycode.z.so libkeyevent.z.so
 
@@ -398,6 +400,31 @@ EOF
     copy_out "$LIB/module/graphics" libdisplaysync.z.so libdrawing_napi.z.so
     copy_out "$LIB/module/app/form" libformhost.z.so libforminfo.z.so
 
+
+    copy_out "$LIB/module/data" \
+        libpreferences.z.so librelationalstore.z.so \
+        libdatashare.z.so libdatasharepredicates.z.so \
+        libuniformtypedescriptor_napi.z.so
+
+
+
+    echo "настройки оконной подсистемы"
+    mkdir -p /system/etc/window/resources
+    cp -f "$TREE"/foundation/window/window_manager/resources/config/other/window_manager_config.xml \
+          "$TREE"/foundation/window/window_manager/resources/config/other/display_manager_config.xml \
+          /system/etc/window/resources/ 2>/dev/null && echo "  window/display config"
+
+
+# подчищаем неверно разложенные копии прошлых заходов
+rm -f "$LIB"/module/multimedia/libimage_napi.z.so
+    echo "наши системные файлы"
+    mkdir -p /system/etc/app /system/etc/sandbox
+    cp -f "$SCRIPT_DIR"/etc/install_list.json \
+          "$SCRIPT_DIR"/etc/install_list_capability.json \
+          "$SCRIPT_DIR"/etc/install_list_permissions.json \
+          /system/etc/app/ 2>/dev/null && echo "  списки предустановки"
+    cp -f "$SCRIPT_DIR"/etc/appdata-sandbox.json /system/etc/sandbox/ \
+          2>/dev/null && echo "  песочница приложений"
     echo "готово"
 }
 
@@ -588,7 +615,7 @@ done
 chmod 666 /dev/unix/socket/hilog* 2>/dev/null
 # 16 МБ — верхний предел; при холостом шуме это около часа записи,
 # чего хватает, чтобы снять момент загрузки уже после её окончания.
-"$BIN/hilog" -G 16M >/dev/null 2>&1
+"$BIN/hilog" -G 16M
 
 echo "samgr"
 start_bg samgr "$BIN/samgr"
@@ -672,6 +699,8 @@ start_sa param_watcher 3901
 # Служба способов ввода: текстовые поля запрашивают у неё сеанс ввода.
 start_sa inputmethod_service 3703
 
+
+/system/bin/param set bootevent.boot.completed true
 echo
 echo "готово, реестр:"
 "$SAMGR_CLIENT" 2>/dev/null
