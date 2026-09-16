@@ -1,0 +1,10 @@
+{
+    "install_list": [
+        {
+            "bundleName": "com.ohos.sceneboard",
+            "app_signature": ["com.ohos.sceneboard_"],
+            "allowAppUsePrivilegeExtension": true,
+            "allowAppRunWhenDeviceFirstLocked": true
+        }
+    ]
+}
