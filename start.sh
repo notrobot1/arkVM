@@ -473,6 +473,15 @@ json.dump({"process": "useriam", "systemability": sa},
 EOF
 
 
+
+
+
+echo "служба управления питанием"
+copy_out "$LIB" libpowermgrservice.z.so
+cp -f "$TREE"/base/powermgr/power_manager/sa_profile/3301.json \
+      /system/profile/powermgr.json 2>/dev/null
+
+
     echo "готово"
 }
 
@@ -483,9 +492,15 @@ EOF
 stop_all() {
     pkill -f "$BIN/" 2>/dev/null
 
-    for p in accesstoken_service installs storage_manager accountmgr foundation bms \
+    #for p in accesstoken_service installs storage_manager accountmgr foundation bms \
+    #         appspawn composer_host allocator_host param_watcher inputmethod_service \
+    #         distributeddata com.ohos.sceneboard; do
+
+       for p in accesstoken_service installs storage_manager accountmgr foundation bms \
              appspawn composer_host allocator_host param_watcher inputmethod_service \
-             distributeddata com.ohos.sceneboard; do
+             distributeddata screenlock_server useriam powermgr com.ohos.sceneboard; do
+
+
         pkill -f "^$p" 2>/dev/null
     done
 
@@ -496,7 +511,7 @@ stop_all() {
         /data/service/el1/public/account/100/account_info.json 2>/dev/null
     rm -f "$TOKEN_BYPID"/*
 
-    systemctl stop ohos-composer_host ohos-allocator_host 2>/dev/null
+    systemctl stop ohos-power_host ohos-composer_host ohos-allocator_host ohos-useriam_host 2>/dev/null
     systemctl stop ohos-render_service 2>/dev/null
 
     pkill -f multimodalinput
@@ -687,6 +702,8 @@ start_sa    distributeddata 1301
 start_sa_as accountmgr 200 3058 1000
 
 start_sa    multimodalinput 3101
+start_sa powermgr 3301
+
 sleep 1
 set_token multimodalinput
 
@@ -727,6 +744,9 @@ wait_sa 5100 || { echo "  не поднялся, см. $LOGDIR/hdf_devmgr.log"; 
 echo "драйверы дисплея"
 start_hdf allocator_host /vendor/bin/hdf_devhost -i 1 -n allocator_host
 start_hdf composer_host  /vendor/bin/hdf_devhost -i 0 -n composer_host
+start_hdf useriam_host   /vendor/bin/hdf_devhost -i 2 -n useriam_host
+start_hdf power_host /vendor/bin/hdf_devhost -i 3 -n power_host
+
 sleep 2
 
 # Render service обязан подняться раньше оконного менеджера: тот при старте
