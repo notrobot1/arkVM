@@ -144,6 +144,16 @@ ln -sfn /system/etc/abc /etc/abc
     mkdir -p /data/local/tmp
     chmod 777 /data/local/tmp
 
+
+# справочник службы распределённых данных (на устройстве это делает init)
+mkdir -p /data/service/el1/public/database/distributeddata/meta/backup
+mkdir -p /data/service/el1/public/database/distributeddata/kvdb
+mkdir -p /data/service/el1/public/database/distributeddata/rdb
+chown -R 3012:3012 /data/service/el1/public/database/distributeddata
+chmod -R 2770 /data/service/el1/public/database/distributeddata
+cp -f "$OUT"/obj/base/startup/init/services/etc/ohos.para/ohos.para \
+      /system/etc/param/ohos.para
+
 }
 
 
@@ -346,7 +356,8 @@ EOF
     echo "  $(cat /etc/sceneboard.config 2>/dev/null)"
 
     echo "рабочий стол"
-    local SCB="$TREE/applications/standard/hap/sceneboard/SceneBoard.hap"
+    #local SCB="$TREE/applications/standard/hap/sceneboard/SceneBoard.hap"
+    local SCB="$TREE/foundation/window/window_scene_board/product/pc/build/default/outputs/default/pc_sceneboard-default-signed.hap"
     if [ -s "$SCB" ] && [ "$(stat -c %s "$SCB")" -gt 100000 ]; then
         mkdir -p /system/app/SceneBoard
         cp -f "$SCB" /system/app/SceneBoard/
@@ -478,8 +489,29 @@ EOF
 
 echo "служба управления питанием"
 copy_out "$LIB" libpowermgrservice.z.so
-cp -f "$TREE"/base/powermgr/power_manager/sa_profile/3301.json \
-      /system/profile/powermgr.json 2>/dev/null
+#cp -f "$TREE"/base/powermgr/power_manager/sa_profile/3301.json \
+#      /system/profile/powermgr.json 2>/dev/null
+
+python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+sa = []
+for p in (f"{tree}/base/powermgr/power_manager/sa_profile/3301.json",
+          f"{tree}/base/powermgr/display_manager/state_manager/sa_profile/3308.json"):
+    with open(p) as f:
+        sa += json.load(f)["systemability"]
+json.dump({"process": "powermgr", "systemability": sa},
+          open("/system/profile/powermgr.json", "w"), indent=4)
+EOF
+
+
+
+
+copy_out "$LIB" libdisplaymgrservice.z.so
+copy_out "$BIN" power-shell
+
+mkdir -p /system/app/Settings
+cp -f "$TREE"/applications/standard/hap/sceneboard/Settings.hap /system/app/Settings/
 
 
     echo "готово"
@@ -701,8 +733,8 @@ start_sa    distributeddata 1301
 
 start_sa_as accountmgr 200 3058 1000
 
-start_sa    multimodalinput 3101
-start_sa powermgr 3301
+#start_sa multimodalinput 3101
+#start_sa powermgr 3301
 
 sleep 1
 set_token multimodalinput
@@ -766,6 +798,9 @@ wait_sa 10 || { echo "  render_service не поднялся"; exit 1; }
 
 # foundation держит менеджеры способностей, приложений, пакетов, а в режиме
 # сцены ещё и службу экранов (4607) с посредником сеансов (4606).
+start_sa multimodalinput 3101
+start_sa powermgr 3301
+
 start_sa_as foundation 180 5523 1000
 sleep 1
 set_token foundation
