@@ -235,7 +235,9 @@
         { "component": "drivers_peripheral_display", "features": ["drivers_peripheral_display_vdi_default = true", "drivers_peripheral_display_community = true"]},
         { "component": "drivers_devhost" },
         { "component": "drivers_interface_user_auth" },
-{ "component": "drivers_peripheral_user_auth" }
+{ "component": "drivers_peripheral_user_auth" },
+{ "component": "drivers_interface_power" },
+{ "component": "drivers_peripheral_power" }
       ]
     },
         {
