@@ -134,6 +134,16 @@ ensure_dirs() {
     mkdir -p "$LIB"/module/{bundle,data,resourceschedule}
     mkdir -p "$LIB"/module/app/form
     mkdir -p "$LIB"/module/events
+# Код ArkUI читает наборы по корневому пути /etc/abc. На устройстве
+# /etc — ссылка на /system/etc, у нас это каталог хозяйской системы.
+ln -sfn /system/etc/abc /etc/abc
+    mkdir -p "$LIB"/module/application
+ mkdir -p "$LIB"/module/telephony
+    mkdir -p "$LIB"/module/file
+
+    mkdir -p /data/local/tmp
+    chmod 777 /data/local/tmp
+
 }
 
 
@@ -360,7 +370,7 @@ EOF
 
     echo "модули NAPI: звук, учётные записи, ввод"
     copy_out "$LIB/module/multimedia"      libaudio.z.so
-    copy_out "$LIB/module/account"         libosaccount.z.so
+    #copy_out "$LIB/module/account"         libosaccount.z.so
     copy_out "$LIB/module/multimodalinput" libinputmonitor.z.so libkeycode.z.so libkeyevent.z.so
 
     echo "модули NAPI: контейнеры"
@@ -403,7 +413,6 @@ EOF
 
     copy_out "$LIB/module/data" \
         libpreferences.z.so librelationalstore.z.so \
-        libdatashare.z.so libdatasharepredicates.z.so \
         libuniformtypedescriptor_napi.z.so
 
 
@@ -425,6 +434,45 @@ rm -f "$LIB"/module/multimedia/libimage_napi.z.so
           /system/etc/app/ 2>/dev/null && echo "  списки предустановки"
     cp -f "$SCRIPT_DIR"/etc/appdata-sandbox.json /system/etc/sandbox/ \
           2>/dev/null && echo "  песочница приложений"
+
+
+
+
+echo "хранилище настроек"
+mkdir -p /system/app/SettingsData
+cp -f "$TREE"/applications/standard/hap/SettingsData.hap /system/app/SettingsData/
+chmod 644 /system/app/SettingsData/SettingsData.hap
+
+
+echo "настройки службы распределённых данных"
+mkdir -p /system/etc/distributeddata/conf
+cp -f "$TREE"/foundation/distributeddatamgr/datamgr_service/conf/config.json \
+      /system/etc/distributeddata/conf/ && echo "  config.json"
+
+
+echo "служба блокировки экрана"
+copy_out "$LIB" libscreenlock_server.z.so
+cp -f "$TREE"/base/theme/screenlock_mgr/sa_profile/3704.json \
+      /system/profile/screenlock_server.json 2>/dev/null
+
+
+
+echo "служба проверки подлинности"
+copy_out "$LIB" libuserauthservice.z.so
+
+
+python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+sa = []
+for n in (901, 921, 931):
+    with open(f"{tree}/base/useriam/user_auth_framework/sa_profile/default/{n}.json") as f:
+        sa += json.load(f)["systemability"]
+json.dump({"process": "useriam", "systemability": sa},
+          open("/system/profile/useriam.json", "w"), indent=4)
+EOF
+
+
     echo "готово"
 }
 
@@ -650,6 +698,18 @@ set_token multimodalinput
 #sleep 4
 
 
+# Подготовка среды ArkUI до ветвления: без неё набор stateMgmt
+# не попадает в рабочие потоки приложений.
+"$BIN/param" set persist.appspawn.preload false
+"$BIN/param" set persist.appspawn.preloadets false
+
+start_sa param_watcher 3901
+start_sa inputmethod_service 3703
+
+start_sa screenlock_server 3704
+start_sa useriam 901
+
+
 ( cd / && exec "$BIN/appspawn" -mode appspawn \
     --process-name com.ohos.appspawn.startup --start-flags daemon --type standard \
     --sandbox-switch on --bundle-name com.ohos.appspawn.startup --app-operate-type operate \
@@ -694,11 +754,15 @@ chmod 666 /dev/unix/socket/AppSpawn 2>/dev/null
 
 # Служба параметров нужна приложениям для подписки на системные параметры:
 # без неё каждое обращение стоит секунды ожидания на главном потоке.
-start_sa param_watcher 3901
+#start_sa param_watcher 3901
 
 # Служба способов ввода: текстовые поля запрашивают у неё сеанс ввода.
-start_sa inputmethod_service 3703
+#start_sa inputmethod_service 3703
+#start_sa useriam 901
 
+
+#echo "служба блокировки экрана"
+#start_sa screenlock_server 3704
 
 /system/bin/param set bootevent.boot.completed true
 echo
