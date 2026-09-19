@@ -418,6 +418,15 @@ group("all") {
 "//drivers/peripheral/user_auth/hdi_service:hdf_user_auth_service",
 "//drivers/hdf_core/framework/tools/hc-gen:hc_gen",
 
+"//foundation/multimodalinput/input/frameworks/napi/gesture_event:gestureevent",
+"//foundation/multimodalinput/input/frameworks/napi/input_device:inputdevice",
+"//foundation/multimodalinput/input/frameworks/napi/short_key:shortkey",
+
+"//base/powermgr/power_manager/services:powermgrservice",
+"//drivers/peripheral/power/interfaces/hdi_service:hdf_power",
+"//drivers/peripheral/power/interfaces/hdi_service/profile:power_hdi_service_config",
+"//foundation/multimodalinput/input/frameworks/napi/gesture_event:gestureevent",
+
 ]
 }
 
