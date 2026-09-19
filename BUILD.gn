@@ -427,6 +427,24 @@ group("all") {
 "//drivers/peripheral/power/interfaces/hdi_service/profile:power_hdi_service_config",
 "//foundation/multimodalinput/input/frameworks/napi/gesture_event:gestureevent",
 
+"//base/powermgr/display_manager/state_manager/service:displaymgrservice",
+"//base/powermgr/power_manager/utils/shell:power-shell",
+"//foundation/window/window_manager/window_scene/intention_event:libintention_event",
+"//base/startup/init/services/etc:ohos.para",
+"//foundation/filemanagement/disk_manager/interfaces/kits/js:volumemanager",
+
+"//base/powermgr/display_manager/state_manager/frameworks/napi:brightness",
+"//foundation/window/window_manager/interfaces/kits/napi/screenshot:screenshot",
+"//foundation/filemanagement/user_file_service/frameworks/js/napi/file_extension_info_module:fileextensioninfo",
+"//foundation/resourceschedule/device_usage_statistics:usagestatistics",
+"//foundation/communication/netmanager_base/frameworks/js/napi/connection:connection",
+"//foundation/communication/netmanager_base/frameworks/js/napi/netstats:statistics",
+"//foundation/communication/netstack/frameworks/js/napi/http:http",
+"//foundation/window/window_manager/interfaces/kits/napi/screen_runtime:screen_napi",
+
+"//foundation/multimedia/player_framework/interfaces/kits/js:media",
+"//foundation/multimedia/av_session/frameworks/js/napi/session:avsession_napi",
+
 ]
 }
 
