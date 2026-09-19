@@ -198,7 +198,9 @@
         { "component": "storage_service" },
         { "component": "file_api" },
         { "component": "filemanagement_cangjie_wrapper" },
-       { "component": "dfs_service" }
+        { "component": "dfs_service" },
+        { "component": "disk_manager" },
+{ "component": "user_file_service" }
       ]
     },
     {
@@ -438,7 +440,8 @@
           ]
         },
         { "component": "media_library" },
-        { "component": "av_session" }
+        { "component": "av_session" },
+{ "component": "ringtone_library" }
       ]
     },
     {
@@ -454,7 +457,8 @@
 { "component": "frame_aware_sched" },
 { "component": "resource_schedule_service" },
 {"component": "soc_perf"},
-        { "component": "work_scheduler" }
+        { "component": "work_scheduler" },
+{ "component": "device_usage_statistics" }
       ]
     },
     {
