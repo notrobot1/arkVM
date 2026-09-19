@@ -1,0 +1,65 @@
+root {
+    device_info {
+        match_attr = "hdf_manager";
+        template host {
+            hostName = "";
+            priority = 100;
+            uid = "";
+            gid = [""];
+            caps = [""];
+            critical = [];
+            template device {
+                template deviceNode {
+                    policy = 0;
+                    priority = 100;
+                    preload = 0;
+                    permission = 0664;
+                    moduleName = "";
+                    serviceName = "";
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+        display_composer :: host {
+            hostName = "composer_host";
+            priority = 40;
+            processPriority = -8;
+            threadPriority = 1;
+            caps = ["SYS_NICE", "SYS_ADMIN"];
+            uid = ["composer_host"];
+            gid = ["composer_host", "graphics", "vendor_mpp_driver"];
+            composer_device :: device {
+                device0 :: deviceNode {
+                    policy = 2;
+                    priority = 160;
+                    moduleName = "libdisplay_composer_driver_1.0.z.so";
+                    serviceName = "display_composer_service";
+                }
+            }
+        }
+        allocator :: host {
+            hostName = "allocator_host";
+            priority = 40;
+            allocator_device :: device {
+                device0 :: deviceNode {
+                    policy = 2;
+                    priority = 160;
+                    moduleName = "liballocator_driver_1.0.z.so";
+                    serviceName = "allocator_service";
+                }
+            }
+        }
+        user_auth :: host {
+            hostName = "useriam_host";
+            priority = 50;
+            user_auth_device :: device {
+                device0 :: deviceNode {
+                    policy = 2;
+                    priority = 100;
+                    moduleName = "libuser_auth_driver.z.so";
+                    serviceName = "user_auth_interface_service";
+                }
+            }
+        }
+    }
+}
