@@ -32,7 +32,7 @@
       "components": [
         {
           "component": "location_cangjie_wrapper"
-        }
+        },{ "component": "location" }
       ]
     },
     {
@@ -239,7 +239,13 @@
         { "component": "drivers_interface_user_auth" },
 { "component": "drivers_peripheral_user_auth" },
 { "component": "drivers_interface_power" },
-{ "component": "drivers_peripheral_power" }
+{ "component": "drivers_peripheral_power" },
+        { "component": "drivers_interface_user_auth" },
+        { "component": "drivers_peripheral_user_auth" },
+        { "component": "drivers_interface_power" },
+        { "component": "drivers_peripheral_power" },
+        { "component": "drivers_interface_camera" }
+
       ]
     },
         {
@@ -441,7 +447,8 @@
         },
         { "component": "media_library" },
         { "component": "av_session" },
-{ "component": "ringtone_library" }
+{ "component": "ringtone_library" },
+{ "component": "camera_framework" }
       ]
     },
     {
