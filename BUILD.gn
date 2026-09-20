@@ -445,6 +445,21 @@ group("all") {
 "//foundation/multimedia/player_framework/interfaces/kits/js:media",
 "//foundation/multimedia/av_session/frameworks/js/napi/session:avsession_napi",
 "//foundation/multimedia/player_framework/frameworks/js/system_sound_manager:systemsoundmanager",
+
+"//base/customization/enterprise_device_management/interfaces/kits/admin_manager:adminmanager",
+"//foundation/multimedia/av_session/avpicker:avcastpicker",
+"//foundation/multimedia/av_session/avpicker:avcastpickerparam",
+"//foundation/communication/bluetooth/frameworks/js/napi/src/access:access",
+
+
+"//foundation/arkui/ace_engine/advanced_ui_component:advanced_ui_component",
+"//foundation/multimedia/camera_framework/interfaces/kits/js/camera_napi:camera_napi",
+
+"//base/customization/enterprise_device_management/interfaces/kits/location_manager:locationmanager",
+"//base/powermgr/battery_manager/frameworks/napi:charger",
+
+"//base/location/location/frameworks/js/napi:geolocationmanager",
+
 ]
 }
 
