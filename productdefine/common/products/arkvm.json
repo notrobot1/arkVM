@@ -570,7 +570,8 @@
     {
       "subsystem": "customization",
       "components": [
-        { "component": "config_policy" }
+        { "component": "config_policy" },
+{ "component": "enterprise_device_management" }
       ]
     },
     {
