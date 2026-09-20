@@ -444,7 +444,7 @@ group("all") {
 
 "//foundation/multimedia/player_framework/interfaces/kits/js:media",
 "//foundation/multimedia/av_session/frameworks/js/napi/session:avsession_napi",
-
+"//foundation/multimedia/player_framework/frameworks/js/system_sound_manager:systemsoundmanager",
 ]
 }
 
