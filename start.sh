@@ -154,6 +154,9 @@ chmod -R 2770 /data/service/el1/public/database/distributeddata
 cp -f "$OUT"/obj/base/startup/init/services/etc/ohos.para/ohos.para \
       /system/etc/param/ohos.para
 
+
+
+ln -sfn /system/etc/audio /etc/audio
 }
 
 
@@ -514,6 +517,61 @@ mkdir -p /system/app/Settings
 cp -f "$TREE"/applications/standard/hap/sceneboard/Settings.hap /system/app/Settings/
 
 
+
+copy_out lib64 libaudio_policy_service.z.so libaudio_service.z.so \
+               libaudio_proxy_6.1.z.so libeffect_proxy_1.0.z.so libdaudio_proxy_1.0.z.so
+
+python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+sa = []
+for p in ("pulseaudio.json", "audio_policy.json"):
+    with open(f"{tree}/foundation/multimedia/audio_framework/sa_profile/{p}") as f:
+        sa += json.load(f)["systemability"]
+json.dump({"process": "audio_server", "systemability": sa},
+          open("/system/profile/audio_server.json", "w"), indent=4)
+EOF
+
+
+
+mkdir -p /system/etc/audio
+cp -f "$TREE"/foundation/multimedia/audio_framework/services/audio_policy/server/infra/config/file/*.xml \
+      /system/etc/audio/
+chmod 644 /system/etc/audio/*.xml
+
+mkdir -p /vendor/etc/audio
+cp -f "$TREE"/vendor/ohemu/virt/hals/audio/config/x86_64/*.xml /vendor/etc/audio/
+chmod 644 /vendor/etc/audio/*.xml
+
+
+
+
+
+
+mkdir -p /vendor/etc/hdfconfig /chip_prod/etc/hdfconfig /chip_prod/etc/audio
+V="$TREE/vendor/ohemu/virt/hals/audio"
+cp -f "$V"/audio_adapter.json "$V"/audio_paths.json \
+      "$V"/alsa_adapter.json "$V"/alsa_paths.json  /vendor/etc/hdfconfig/
+cp -f "$V"/audio_effect.json                        /chip_prod/etc/hdfconfig/
+cp -f "$V"/config/audio_policy_config_new.xml       /chip_prod/etc/audio/audio_policy_config.xml
+chmod 644 /vendor/etc/hdfconfig/*.json /chip_prod/etc/hdfconfig/*.json /chip_prod/etc/audio/*.xml
+
+
+# вид оконного поведения: свободные окна вместо телефонных
+cat > /system/etc/param/arkvm.para <<'EOF'
+const.window.multiWindowUIType=FreeFormMultiWindow
+EOF
+chmod 644 /system/etc/param/arkvm.para
+
+# настройка окон от настольного продукта вместо заводской заглушки
+cp -f "$TREE"/vendor/hihope/2in1_core_system/window_config/window_manager_config.xml \
+      /system/etc/window/resources/window_manager_config.xml
+chmod 644 /system/etc/window/resources/window_manager_config.xml
+
+sed -i 's/<decor enable="false">/<decor enable="true">/' \
+     /system/etc/window/resources/window_manager_config.xml
+
+
     echo "готово"
 }
 
@@ -543,11 +601,13 @@ stop_all() {
         /data/service/el1/public/account/100/account_info.json 2>/dev/null
     rm -f "$TOKEN_BYPID"/*
 
-    systemctl stop ohos-power_host ohos-composer_host ohos-allocator_host ohos-useriam_host 2>/dev/null
+    systemctl stop ohos-audio_host ohos-power_host ohos-composer_host ohos-allocator_host ohos-useriam_host 2>/dev/null
     systemctl stop ohos-render_service 2>/dev/null
 
     pkill -f multimodalinput
     pkill -f sa_main
+    pkill -x audio_server
+
 }
 
 # Стирать после любого изменения списка процессов или прав в token_init.cpp.
@@ -612,12 +672,22 @@ wait_samgr() {
 }
 
 wait_sa() {
-    for _ in $(seq 1 150); do
-        "$SAMGR_CLIENT" 2>/dev/null | grep -qx "  $1" && return 0
+    local id=$1 tries=${2:-150}
+    for _ in $(seq 1 "$tries"); do
+        "$SAMGR_CLIENT" 2>/dev/null | grep -qx "  $id" && return 0
         sleep 0.2
     done
     return 1
 }
+
+
+#wait_sa() {
+#    for _ in $(seq 1 150); do
+#        "$SAMGR_CLIENT" 2>/dev/null | grep -qx "  $1" && return 0
+#        sleep 0.2
+#    done
+#    return 1
+#}
 
 start_bg() {
     local name=$1; shift
@@ -636,13 +706,22 @@ start_hdf() {
         && echo "  $name" || echo "  $name не запустился"
 }
 
+#start_sa() {
+#    local name=$1 id=$2
+#    echo "$name ($id)"
+#    /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "/system/profile/$name.json" \
+#        > "$LOGDIR/$name.log" 2>&1 &
+#    echo "  pid $!"
+#    wait_sa "$id" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
+#}
+
 start_sa() {
-    local name=$1 id=$2
+    local name=$1 id=$2 tries=${3:-150}
     echo "$name ($id)"
-    /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "/system/profile/$name.json" \
+    ( cd / && exec /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "/system/profile/$name.json" ) \
         > "$LOGDIR/$name.log" 2>&1 &
     echo "  pid $!"
-    wait_sa "$id" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
+    wait_sa "$id" "$tries" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
 }
 
 # Запуск сервиса под своим пользователем, группами и возможностями —
@@ -733,6 +812,8 @@ start_sa    distributeddata 1301
 
 start_sa_as accountmgr 200 3058 1000
 
+#start_sa audio_server 3009 900
+
 #start_sa multimodalinput 3101
 #start_sa powermgr 3301
 
@@ -778,8 +859,13 @@ start_hdf allocator_host /vendor/bin/hdf_devhost -i 1 -n allocator_host
 start_hdf composer_host  /vendor/bin/hdf_devhost -i 0 -n composer_host
 start_hdf useriam_host   /vendor/bin/hdf_devhost -i 2 -n useriam_host
 start_hdf power_host /vendor/bin/hdf_devhost -i 3 -n power_host
+start_hdf audio_host /vendor/bin/hdf_devhost -i 4 -n audio_host
+
+
 
 sleep 2
+
+start_sa audio_server 3009 900
 
 # Render service обязан подняться раньше оконного менеджера: тот при старте
 # спрашивает у него список экранов. Сам он требует работающего композитора.
