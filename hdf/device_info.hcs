@@ -73,5 +73,27 @@ root {
                 }
             }
         }
+       
+        audio :: host {
+          hostName = "audio_host";
+          priority = 50;
+          gid = ["audio_host", "uhdf_driver", "root", "audio"];
+          idl_audio_device :: device {
+          device0 :: deviceNode {
+            policy = 2;
+            priority = 100;
+            moduleName = "libaudio_primary_driver.z.so";
+            serviceName = "audio_manager_service";
+          }
+        }
+        effect_device :: device {
+           device0 :: deviceNode {
+              policy = 2;
+              priority = 100;
+              moduleName = "libeffect_model_service.z.so";
+              serviceName = "effect_model_service";
+          }
+        }
+       }
     }
 }
