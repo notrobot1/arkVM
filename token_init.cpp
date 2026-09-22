@@ -18,7 +18,7 @@ const char *PERMS[] = {
     "ohos.permission.LISTEN_BUNDLE_CHANGE",
     "ohos.permission.REMOVE_CACHE_FILES",
     "ohos.permission.CHANGE_ABILITY_ENABLED_STATE",
-    "ohos.permission.STORAGE_MANAGER",
+       "ohos.permission.STORAGE_MANAGER",
     "ohos.permission.STORAGE_MANAGER_CRYPT",
     "ohos.permission.MOUNT_UNMOUNT_MANAGER",
     "ohos.permission.MOUNT_FORMAT_MANAGER",
@@ -34,7 +34,7 @@ const char *PERMS[] = {
     "ohos.permission.START_ABILITIES_FROM_BACKGROUND",
     "ohos.permission.START_INVISIBLE_ABILITY",
     "ohos.permission.ABILITY_BACKGROUND_COMMUNICATION",
-    "ohos.permission.USE_USER_IDM",
+"ohos.permission.USE_USER_IDM",
     "ohos.permission.MANAGE_USER_IDM",
     "ohos.permission.ACCESS_USER_AUTH_INTERNAL",
 };
@@ -70,6 +70,7 @@ const char *PROCESSES[] = {
     "screenlock_server",
     "useriam",
     "powermgr",
+    "audio_server",
 };
 
 constexpr const char *BYNAME_DIR = "/data/service/el0/access_token/byname";
