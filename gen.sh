@@ -17,6 +17,7 @@ prebuilts/build-tools/linux-x86/bin/gn gen out/arkvm \
     product_path="/home/openharmony/productdefine/common/products"
     product_config_path="/home/openharmony/productdefine/common/products"
     device_name="sdk"
+    device_type="2in1"
     device_path="/home/openharmony/device/board/ohos/sdk"
     device_config_path="/home/openharmony/device/board/ohos/sdk"
     build_ohos_sdk=false
@@ -33,16 +34,16 @@ prebuilts/build-tools/linux-x86/bin/gn gen out/arkvm \
     bundle_framework_launcher=true
     bundle_framework_sandbox_app=false
     bundle_framework_quick_fix=false
-    bundle_framework_app_control=false
+    bundle_framework_app_control=true
     bundle_framework_overlay_install=false
     bundle_framework_bundle_resource=true
     distributed_bundle_framework=false
-    device_usage_statistics_enabled=false
+    device_usage_statistics_enabled=true
     udmf_enabled=false
     webview_enable=false
     runtime_core_enable_codegen=false
     app_domain_verify_enabled=false
-    user_auth_framework_impl_enabled=false
+    user_auth_framework_impl_enabled=true
     api_metrics_enable=false
     bms_device_info_manager_part_enabled=false
     window_enable=false
