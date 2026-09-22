@@ -460,6 +460,24 @@ group("all") {
 
 "//base/location/location/frameworks/js/napi:geolocationmanager",
 
+"//developtools/profiler/hidebug/interfaces/js/kits/napi:hidebug",
+
+"//foundation/multimedia/audio_framework/services/audio_policy:audio_policy_service",
+"//foundation/multimedia/audio_framework/services/audio_service:audio_service",
+"//drivers/peripheral/audio/effect/host:effect_model_service",
+"//drivers/peripheral/audio/hdi_service:idl_audio",
+"//drivers/peripheral/audio/effect/model:effect_model_service_1.0",
+
+
+"//foundation/communication/wifi/wifi/frameworks/js/napi:wifimanager",
+"//foundation/communication/bluetooth/frameworks/js/napi:bluetooth",
+"//base/security/certificate_manager/interfaces/kits/napi:certmanager",
+"//foundation/resourceschedule/background_task_mgr/interfaces/kits:backgroundtaskmanager",
+"//base/telephony/core_service/frameworks/js/esim:esim",
+"//base/customization/enterprise_device_management/interfaces/kits/wifi_manager:wifimanager",
+"//base/customization/enterprise_device_management/interfaces/kits/bluetooth_manager:bluetoothmanager",
+
+
 ]
 }
 
