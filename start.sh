@@ -560,6 +560,9 @@ chmod 644 /vendor/etc/hdfconfig/*.json /chip_prod/etc/hdfconfig/*.json /chip_pro
 # вид оконного поведения: свободные окна вместо телефонных
 cat > /system/etc/param/arkvm.para <<'EOF'
 const.window.multiWindowUIType=FreeFormMultiWindow
+const.global.language=en-Latn-US
+const.global.locale=en-Latn-US
+const.global.region=US
 EOF
 chmod 644 /system/etc/param/arkvm.para
 
@@ -570,6 +573,39 @@ chmod 644 /system/etc/window/resources/window_manager_config.xml
 
 sed -i 's/<decor enable="false">/<decor enable="true">/' \
      /system/etc/window/resources/window_manager_config.xml
+
+#install -m 644 third_party/noto-cjk/Sans/OTC/NotoSansCJK-Regular.ttc /system/fonts/
+#install -m 644 base/global/system_resources/fonts/HMSymbolVF.ttf /system/fonts/
+
+
+
+#grep -oE '"[A-Za-z0-9 _-]+\.tt[fc]"' /system/etc/fontconfig.json | tr -d '"' | sort -u | while read f; do
+#  [ -f "/system/fonts/$f" ] && continue
+#  src=$(find third_party base -name "$f" -not -path "*/test/*" -not -path "*/out/*" 2>/dev/null | head -1)
+#  [ -n "$src" ] && sudo install -m 644 "$src" /system/fonts/ && echo "поставил: $f"
+#done
+
+
+    # Bluetooth: служба, слой драйверов, связь с ним и наша подставка
+    for lib in libbluetooth_server.z.so libbluetooth_hci_proxy_1.0.z.so \
+               libbluetooth_hci_stub_1.0.z.so; do
+        src=$(find "$TREE/out/arkvm" -name "$lib" -not -path "*/clang_x64/*" | head -1)
+        if [ -n "$src" ]; then install -m 644 "$src" /system/lib64/; else echo "нет: $lib"; fi
+    done
+
+    for lib in libhci_interface_service_1.0.z.so libbluetooth_hci_hdi_driver.z.so libbt_vendor.z.so; do
+        src=$(find "$TREE/out/arkvm" -name "$lib" -not -path "*/clang_x64/*" | head -1)
+        if [ -n "$src" ]; then
+            install -m 644 "$src" /vendor/lib64/
+            install -m 644 "$src" /system/lib64/
+        else
+            echo "нет: $lib"
+        fi
+    done
+
+    install -m 644 "$TREE/foundation/communication/bluetooth_service/sa_profile/1130.json" \
+        /system/profile/bluetooth_service.json
+
 
 
     echo "готово"
@@ -603,7 +639,7 @@ stop_all() {
 
     systemctl stop ohos-audio_host ohos-power_host ohos-composer_host ohos-allocator_host ohos-useriam_host 2>/dev/null
     systemctl stop ohos-render_service 2>/dev/null
-
+    systemctl stop bluetooth
     pkill -f multimodalinput
     pkill -f sa_main
     pkill -x audio_server
@@ -860,7 +896,7 @@ start_hdf composer_host  /vendor/bin/hdf_devhost -i 0 -n composer_host
 start_hdf useriam_host   /vendor/bin/hdf_devhost -i 2 -n useriam_host
 start_hdf power_host /vendor/bin/hdf_devhost -i 3 -n power_host
 start_hdf audio_host /vendor/bin/hdf_devhost -i 4 -n audio_host
-
+start_hdf bluetooth_host /vendor/bin/hdf_devhost -i 5 -n bluetooth_host
 
 
 sleep 2
@@ -886,6 +922,8 @@ wait_sa 10 || { echo "  render_service не поднялся"; exit 1; }
 # сцены ещё и службу экранов (4607) с посредником сеансов (4606).
 start_sa multimodalinput 3101
 start_sa powermgr 3301
+
+start_sa bluetooth_service 1130 300
 
 start_sa_as foundation 180 5523 1000
 sleep 1
