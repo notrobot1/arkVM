@@ -477,6 +477,13 @@ group("all") {
 "//base/customization/enterprise_device_management/interfaces/kits/wifi_manager:wifimanager",
 "//base/customization/enterprise_device_management/interfaces/kits/bluetooth_manager:bluetoothmanager",
 
+    "//foundation/communication/bluetooth_service/services/bluetooth/server:bluetooth_server",
+    "//foundation/communication/bluetooth_service/services/bluetooth/service:btsbc",
+    "//drivers/peripheral/bluetooth/hci/hdi_service:libhci_interface_service_1.0",
+    "//drivers/peripheral/bluetooth/hci/hdi_service:libbluetooth_hci_hdi_driver",
+    "//drivers/interface/bluetooth/hci/v1_0:libbluetooth_hci_proxy_1.0",
+    "//drivers/interface/bluetooth/hci/v1_0:libbluetooth_hci_stub_1.0",
+
 
 ]
 }
