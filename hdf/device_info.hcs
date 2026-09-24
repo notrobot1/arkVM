@@ -95,5 +95,21 @@ root {
           }
         }
        }
+
+      bluetooth :: host {
+        hostName = "bluetooth_host";
+        priority = 50;
+        gid = ["bluetooth_host", "uhdf_driver", "root"];
+        hci_device :: device {
+            device0 :: deviceNode {
+                policy = 2;
+                priority = 100;
+                moduleName = "libbluetooth_hci_hdi_driver.z.so";
+                serviceName = "hci_interface_service";
+            }
+        }
+      }
+
+
     }
 }
