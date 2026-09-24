@@ -8,7 +8,6 @@ _tc = "//build/toolchain/ohos:ohos_clang_x86_64"
 
 
 
-
 ohos_executable("display_probe") {
   sources = [ "display_probe.cpp" ]
   external_deps = [
