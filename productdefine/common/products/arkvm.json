@@ -141,7 +141,11 @@
         { "component": "communication_cangjie_wrapper" },
         { "component": "connectivity_cangjie_wrapper" },
         { "component": "netmanager_cangjie_wrapper" },
-       {"component": "drivers_interface_bluetooth" }
+       {"component": "drivers_interface_bluetooth" },
+        { "component": "bluetooth_native_js" },
+        { "component": "bluetooth" },
+        { "component": "bluetooth_service" },
+        { "component": "communication_cangjie_wrapper" }
       ]
     },
     {
@@ -244,7 +248,11 @@
         { "component": "drivers_peripheral_user_auth" },
         { "component": "drivers_interface_power" },
         { "component": "drivers_peripheral_power" },
-        { "component": "drivers_interface_camera" }
+        { "component": "drivers_interface_camera" },
+{ "component": "drivers_interface_audio" },
+{ "component": "drivers_interface_distributed_audio" },
+{ "component": "drivers_peripheral_audio" },
+{ "component": "drivers_interface_wlan" }
 
       ]
     },
@@ -549,7 +557,8 @@
   { "component": "xmp_toolkit_sdk"},
  { "component": "libevdev" },
         { "component": "libinput" },
-        { "component": "libudev" }
+        { "component": "libudev" },
+        { "component": "grpc" }
       
       ]
     },
