@@ -4,18 +4,20 @@
 #   sudo ./start.sh stop     — погасить
 #   sudo ./start.sh status   — что зарегистрировано в samgr
 #   sudo ./start.sh install  — разложить собранное по системным каталогам
-#   sudo ./start.sh tokens   — стереть реестр токенов и базу ATM
+#   sudo ./start.sh tokens   — стереть удостоверения и состояние пакетов
 #   sudo ./start.sh reset    — стереть всё изменяемое состояние
 #
-# ВНИМАНИЕ: tokens и reset стирают базу маркеров доступа вместе с маркерами
-# установленных приложений. После них приложения не запустятся, пока их не
-# переустановишь (bm install -p ...). Для рабочего стола это обязательно.
+# ВНИМАНИЕ: tokens и reset стирают хранилище удостоверений вместе с
+# удостоверениями установленных приложений, поэтому заодно стирается и
+# состояние распорядителя пакетов — иначе он сочтёт пакеты установленными,
+# а их удостоверений уже не будет, и оболочка не запустится вовсе.
+# Первый запуск после сброса заметно дольше: пакеты ставятся заново.
 
 set -u
 
-#export OHOS_MESA_DRIVER=swrast
 BIN=${BIN:-/system/bin}
 LIB=${LIB:-/system/lib64}
+VLIB=${VLIB:-/vendor/lib64}
 LOGDIR=${LOGDIR:-/tmp/arkvm}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE="$(dirname "$SCRIPT_DIR")"
@@ -23,33 +25,36 @@ OUT=${OUT:-$TREE/out/arkvm}
 
 export LD_LIBRARY_PATH=/system/lib64:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough
 
-#export LD_LIBRARY_PATH=/system/lib64:/system/lib64/module/multimedia:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough
-
 SAMGR_CLIENT=$BIN/samgr_client
 SA_MAIN=$BIN/sa_main
 
 TOKEN_BYNAME=/data/service/el0/access_token/byname
 TOKEN_BYPID=/data/service/el0/access_token/bypid
 
+# Владельцы из base/startup/init/services/etc/passwd:
+UID_ACCOUNT=3058      # менеджер учётных записей
+UID_INSTALLS=3060     # установщик пакетов
+UID_FOUNDATION=5523   # foundation, в нём же распорядитель пакетов
+UID_DDATA=3012        # служба распределённых данных
 
 # ---------------------------------------------------------------------------
 # Каталоги, которые на устройстве создаёт init по описаниям в *.cfg.
 # ---------------------------------------------------------------------------
 ensure_dirs() {
-    local u=100
+    local u=100 lvl
 
     mkdir -p "$LOGDIR"
     mkdir -p /dev/unix/socket
     mkdir -p /system/profile
-    mkdir -p /system/etc/{app,account,storage_daemon}
+    mkdir -p /system/etc/{app,account,storage_daemon,sandbox}
     mkdir -p /system/etc/param/ohos_const
 
-    # реестр токенов и база прав
+    # хранилище удостоверений
     mkdir -p "$TOKEN_BYNAME" "$TOKEN_BYPID"
     mkdir -p /data/service/el1/public/access_token
     chmod 777 "$TOKEN_BYPID"
 
-    # менеджер пакетов
+    # распорядитель пакетов
     mkdir -p /data/service/el1/public/bms/bundle_manager_service
     mkdir -p /data/bundlemgr
 
@@ -100,19 +105,12 @@ ensure_dirs() {
     # то, что видит само приложение
     mkdir -p /data/storage/el1/bundle
 
-    # Владельцы. Номера из base/startup/init/services/etc/passwd:
-    # account 3058, installs 3060, foundation 5523, группа system 1000.
-    chown -R 3058:3058 /data/service/el1/public/account
-    chown -R 5523:5523 /data/service/el1/public/bms /data/bundlemgr
-    chmod -R 775       /data/service/el1/public/bms
-    chown -R 5523:5523 /data/app/el1/bundle
-    chmod 711          /data/app/el1/bundle/public
+    fix_owners
 
     mkdir -p /data/service/el1/startup/appspawn
     mkdir -p /data/service/el1/startup/log
     chmod 700 /data/service/el1/startup/appspawn
     chmod 755 /data/service/el1/startup/log
-
     chmod 666 /dev/unix/socket/AppSpawn 2>/dev/null
 
     mkdir -p /data/service/el0/render_service
@@ -122,7 +120,7 @@ ensure_dirs() {
     echo '/tmp/core.%e.%p' > /proc/sys/kernel/core_pattern
     ulimit -c unlimited
 
-    ln -sf libdisplay_buffer_vdi_impl_default.z.so /vendor/lib64/libdisplay_buffer_vdi_impl.z.so
+    ln -sf libdisplay_buffer_vdi_impl_default.z.so "$VLIB"/libdisplay_buffer_vdi_impl.z.so
 
     # Права для эмуляции и чтения устройств ввода MMI
     mkdir -p /dev/char /dev/v4l
@@ -130,35 +128,43 @@ ensure_dirs() {
     mkdir -p /data/service/el1/public/udev
     chmod 755 /data/service/el1/public/multimodalinput /data/service/el1/public/udev
     chmod 666 /dev/input/* /dev/uinput 2>/dev/null
+
     mkdir -p "$LIB"/module/{multimedia,account,multimodalinput}
-    mkdir -p "$LIB"/module/{bundle,data,resourceschedule}
+    mkdir -p "$LIB"/module/{bundle,data,resourceschedule,events,application,telephony,file}
     mkdir -p "$LIB"/module/app/form
-    mkdir -p "$LIB"/module/events
-# Код ArkUI читает наборы по корневому пути /etc/abc. На устройстве
-# /etc — ссылка на /system/etc, у нас это каталог хозяйской системы.
-ln -sfn /system/etc/abc /etc/abc
-    mkdir -p "$LIB"/module/application
- mkdir -p "$LIB"/module/telephony
-    mkdir -p "$LIB"/module/file
+
+    # Код ArkUI читает наборы по корневому пути /etc/abc, а на устройстве
+    # /etc — ссылка на /system/etc; у нас это каталог хозяйской системы.
+    ln -sfn /system/etc/abc /etc/abc
+    ln -sfn /system/etc/audio /etc/audio
 
     mkdir -p /data/local/tmp
     chmod 777 /data/local/tmp
 
+    # справочник службы распределённых данных (на устройстве это делает init)
+    mkdir -p /data/service/el1/public/database/distributeddata/meta/backup
+    mkdir -p /data/service/el1/public/database/distributeddata/kvdb
+    mkdir -p /data/service/el1/public/database/distributeddata/rdb
+    chown -R $UID_DDATA:$UID_DDATA /data/service/el1/public/database/distributeddata
+    chmod -R 2770 /data/service/el1/public/database/distributeddata
 
-# справочник службы распределённых данных (на устройстве это делает init)
-mkdir -p /data/service/el1/public/database/distributeddata/meta/backup
-mkdir -p /data/service/el1/public/database/distributeddata/kvdb
-mkdir -p /data/service/el1/public/database/distributeddata/rdb
-chown -R 3012:3012 /data/service/el1/public/database/distributeddata
-chmod -R 2770 /data/service/el1/public/database/distributeddata
-cp -f "$OUT"/obj/base/startup/init/services/etc/ohos.para/ohos.para \
-      /system/etc/param/ohos.para
+    cp -f "$OUT"/obj/base/startup/init/services/etc/ohos.para/ohos.para \
+          /system/etc/param/ohos.para
 
-
-
-ln -sfn /system/etc/audio /etc/audio
+    mkdir -p /data/service/el1/public/bluetooth
+    chmod 770 /data/service/el1/public/bluetooth
 }
 
+# Владельцы и права каталогов, которые проверяет installd. Вынесено отдельно:
+# после сброса состояния их надо восстанавливать, иначе распорядитель пакетов
+# ругается «mode not same» и «uid or gid are not same».
+fix_owners() {
+    chown -R $UID_ACCOUNT:$UID_ACCOUNT /data/service/el1/public/account
+    chown -R $UID_FOUNDATION:$UID_FOUNDATION /data/service/el1/public/bms /data/bundlemgr
+    chmod 0755 /data/service/el1/public/bms/bundle_manager_service
+    chown -R $UID_FOUNDATION:$UID_FOUNDATION /data/app/el1/bundle
+    chmod 711 /data/app/el1/bundle/public
+}
 
 # ---------------------------------------------------------------------------
 # Разложить собранное по системным каталогам.
@@ -166,24 +172,61 @@ ln -sfn /system/etc/audio /etc/audio
 # собственные цели и про готовые библиотеки из prebuilts — их копируем сами.
 # ---------------------------------------------------------------------------
 
+# find_out <имя файла> — найти в дереве сборки готовый файл, минуя
+# промежуточные, неочищенные и хозяйские сборки.
+find_out() {
+    find "$OUT" -name "$1" -type f \
+         -not -path "*/obj/*" -not -path "*unstripped*" \
+         -not -path "*/clang_x64/*" -not -path "*/ohos_clang_x86_64/*" \
+         2>/dev/null | head -1
+}
+
 # copy_out <каталог назначения> <имя файла> [имя файла ...]
-# Ищет файл в дереве сборки (мимо промежуточных и неочищенных копий)
-# и копирует в указанный каталог.
 copy_out() {
     local dst=$1; shift
     local name p
     mkdir -p "$dst"
     for name in "$@"; do
-        p=$(find "$OUT" -name "$name" -type f \
-                 -not -path "*/obj/*" -not -path "*unstripped*" \
-                 -not -path "*/clang_x64/*" -not -path "*/ohos_clang_x86_64/*" \
-                 2>/dev/null | head -1)
+        p=$(find_out "$name")
         if [ -n "$p" ]; then
-            cp -f "$p" "$dst/" && echo "  $name"
+            install -m 644 "$p" "$dst/" && echo "  $name"
         else
             echo "  не найдено: $name"
         fi
     done
+}
+
+# install_hap <каталог> <исходный файл> <итоговое имя>
+# Каталог очищается: распорядитель пакетов отказывается разбирать каталог,
+# в котором лежит больше одного основного пакета («more than one entry hap»).
+install_hap() {
+    local dir=$1 src=$2 name=$3
+    if [ ! -s "$src" ] || [ "$(stat -c %s "$src")" -lt 100000 ]; then
+        echo "  нет или заглушка: $src"
+        return 1
+    fi
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    install -m 644 "$src" "$dir/$name" && echo "  $name"
+}
+
+install_fonts() {
+    echo "шрифты"
+    local f src
+    mkdir -p /system/fonts
+    grep -oE '"[A-Za-z0-9 _-]+\.tt[fc]"' /system/etc/fontconfig.json 2>/dev/null |
+    tr -d '"' | sort -u | while read -r f; do
+        [ -f "/system/fonts/$f" ] && continue
+        src=$(find "$TREE/third_party" "$TREE/base" -name "$f" \
+                   -not -path "*/test/*" -not -path "*/out/*" 2>/dev/null | head -1)
+        [ -n "$src" ] || continue
+        # В дереве часть начертаний — указатели git-lfs по сотне байт.
+        [ "$(stat -c %s "$src")" -lt 10000 ] && continue
+        install -m 644 "$src" /system/fonts/ && echo "  $f"
+    done
+    # Убираем пустышки, оставшиеся от прежних заходов: подбор начертаний
+    # на них спотыкается.
+    find /system/fonts -size -10k -delete 2>/dev/null
 }
 
 install_all() {
@@ -199,7 +242,7 @@ install_all() {
                  -not -path "*/obj/*" -not -path "*unstripped*" \
                  -not -path "*/clang_x64/*" | head -1)
         if [ -n "$p" ]; then
-            cp -f "$p" "$BIN/$t" && chmod 755 "$BIN/$t" && echo "  $t"
+            install -m 755 "$p" "$BIN/$t" && echo "  $t"
         else
             echo "  не найдено: $t"
         fi
@@ -214,22 +257,21 @@ install_all() {
     echo "конфигурация HDF"
     if [ -f "$SCRIPT_DIR/hdf/hdf_default.hcb" ]; then
         mkdir -p /vendor/etc/hdfconfig
-        cp -f "$SCRIPT_DIR/hdf/hdf_default.hcb" /vendor/etc/hdfconfig/
-        chmod 644 /vendor/etc/hdfconfig/hdf_default.hcb
+        install -m 644 "$SCRIPT_DIR/hdf/hdf_default.hcb" /vendor/etc/hdfconfig/
         echo "  hdf_default.hcb"
     else
         echo "  нет hdf_default.hcb (соберите hc-gen)"
     fi
 
     echo "эталонные реализации HDI дисплея"
-    mkdir -p /vendor/lib64
+    mkdir -p "$VLIB"
     cp -f "$OUT"/hdf/drivers_peripheral_display/libdisplay_composer_vdi_impl_default.z.so \
           "$OUT"/hdf/drivers_peripheral_display/libdisplay_buffer_vdi_impl_default.z.so \
-          /vendor/lib64/ 2>/dev/null && chmod 644 /vendor/lib64/*vdi_impl_default*
+          "$VLIB"/ 2>/dev/null && chmod 644 "$VLIB"/*vdi_impl_default*
     # Имя без приставки "_default" — место для реализации производителя.
     # Своей у нас нет, подставляем эталонную.
-    ln -sf libdisplay_buffer_vdi_impl_default.z.so   /vendor/lib64/libdisplay_buffer_vdi_impl.z.so
-    ln -sf libdisplay_composer_vdi_impl_default.z.so /vendor/lib64/libdisplay_composer_vdi_impl.z.so
+    ln -sf libdisplay_buffer_vdi_impl_default.z.so   "$VLIB"/libdisplay_buffer_vdi_impl.z.so
+    ln -sf libdisplay_composer_vdi_impl_default.z.so "$VLIB"/libdisplay_composer_vdi_impl.z.so
     echo "  связи vdi_impl"
 
     echo "mesa"
@@ -267,38 +309,64 @@ EOF
     # в /system/lib64/module; точка в имени модуля означает подкаталог.
     # -----------------------------------------------------------------------
     echo "модули NAPI: ArkUI"
-    local SRC="$OUT/arkui/ace_engine"
+    local SRC="$OUT/arkui/ace_engine" m
     mkdir -p "$LIB"/module/{arkui,graphics,file,util,app/ability}
     for m in componentutils componentsnapshot dragcontroller focuscontroller \
              smartgesturecontroller inspector observer performancemonitor \
              textmenucontroller uimaterial containerutils colorsampler; do
-        [ -f "$SRC/lib$m.z.so" ] && cp -f "$SRC/lib$m.z.so" "$LIB"/module/arkui/
+        [ -f "$SRC/lib$m.z.so" ] && install -m 644 "$SRC/lib$m.z.so" "$LIB"/module/arkui/
     done
-    [ -f "$SRC/libdisplaysync.z.so" ] && cp -f "$SRC/libdisplaysync.z.so" "$LIB"/module/graphics/
+    [ -f "$SRC/libdisplaysync.z.so" ] && install -m 644 "$SRC/libdisplaysync.z.so" "$LIB"/module/graphics/
     for m in configuration device font grid measure mediaquery overlay \
              prompt promptaction router animator atomicservicebar luminancesampler; do
-        [ -f "$SRC/lib$m.z.so" ] && cp -f "$SRC/lib$m.z.so" "$LIB"/module/
+        [ -f "$SRC/lib$m.z.so" ] && install -m 644 "$SRC/lib$m.z.so" "$LIB"/module/
     done
 
     echo "модули NAPI: общие"
     copy_out "$LIB/module" \
         libprocess.z.so libhitracemeter_napi.z.so libsystemdatetime.z.so \
         libscenesessionmanager_napi.z.so libsystemparameter.z.so \
+        libsystemparameterenhance.z.so libdeviceinfo.z.so \
         libutil.z.so libjson.z.so libstream.z.so libcollections.z.so \
         libtaskpool.z.so libworker.z.so libutils.z.so \
         libtimer.z.so libconsole.z.so libdfx.z.so \
         liburi.z.so liburl.z.so libbuffer.z.so libxml.z.so libconvertxml.z.so \
         libfileio.z.so \
         libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so \
-        libbatteryinfo.z.so libinputmethod.z.so libintl.z.so \
-        libnotificationsubscribe.z.so libsystemtimer.z.so libvibrator.z.so \
-        libhgmnapi.z.so
+        libbatteryinfo.z.so libinputmethod.z.so libintl.z.so libi18n.z.so \
+        libnotificationsubscribe.z.so libnotificationmanager.z.so \
+        libsystemtimer.z.so libvibrator.z.so libhgmnapi.z.so \
+        libhitracechain_napi.z.so libhisysevent_napi.z.so \
+        libsettings.z.so libscreenlock.z.so \
+        libcommoneventmanager.z.so libcommonevent.z.so \
+        libsessionmanagerservice_napi.z.so libtransactionmanager_napi.z.so \
+        libpower.z.so libthermal.z.so libbundle.z.so
 
     echo "модули NAPI: файлы"
     copy_out "$LIB/module/file" libfs.z.so libfileuri.z.so
 
     echo "модули NAPI: контейнеры"
-    copy_out "$LIB/module/util" libarraylist.z.so libhashmap.z.so libhashset.z.so
+    copy_out "$LIB/module/util" \
+        libarraylist.z.so libdeque.z.so libqueue.z.so libvector.z.so \
+        liblinkedlist.z.so liblist.z.so libstack.z.so libstruct.z.so \
+        libtreemap.z.so libtreeset.z.so libhashmap.z.so libhashset.z.so \
+        liblightweightmap.z.so liblightweightset.z.so libplainarray.z.so
+
+    echo "модули NAPI: звук, ввод, события, отрисовка"
+    copy_out "$LIB/module/multimedia"      libaudio.z.so
+    copy_out "$LIB/module/multimodalinput" libinputmonitor.z.so libkeycode.z.so libkeyevent.z.so
+    copy_out "$LIB/module/events"          libemitter.z.so
+    copy_out "$LIB/module/graphics"        libdisplaysync.z.so libdrawing_napi.z.so
+
+    echo "модули NAPI: пакеты, данные, карточки, расписание"
+    copy_out "$LIB/module/bundle" \
+        libbundlemanager.z.so libbundleresourcemanager.z.so \
+        libbundlemonitor.z.so libinstaller.z.so \
+        liblauncherbundlemanager.z.so libshortcutmanager.z.so
+    copy_out "$LIB/module/data" \
+        libpreferences.z.so librelationalstore.z.so libuniformtypedescriptor_napi.z.so
+    copy_out "$LIB/module/app/form"        libformhost.z.so libforminfo.z.so
+    copy_out "$LIB/module/resourceschedule" libworkscheduler.z.so
 
     echo "модули NAPI: расширения способностей"
     copy_out "$LIB/module/app/ability" \
@@ -309,27 +377,15 @@ EOF
         libservice_extension_module.z.so libui_extension_module.z.so \
         libform_extension_module.z.so
 
+    # подчищаем неверно разложенные копии прошлых заходов
+    rm -f "$LIB"/module/multimedia/libimage_napi.z.so
+
     chmod 644 "$LIB"/module/*.so "$LIB"/module/*/*.so 2>/dev/null
     chmod 644 "$LIB"/module/app/ability/*.so "$LIB"/extensionability/*.so 2>/dev/null
 
     # -----------------------------------------------------------------------
-    # Системные ресурсы, службы и рабочий стол
+    # Службы
     # -----------------------------------------------------------------------
-    echo "системные ресурсы"
-    local RES="$OUT/obj/base/global/system_resources/systemres/SystemResources.hap"
-    if [ -f "$RES" ]; then
-        mkdir -p /system/app/ohos.global.systemres /system/app/SystemResources /data/global/systemResources
-        cp -f "$RES" /system/app/ohos.global.systemres/
-        cp -f "$RES" /system/app/SystemResources/
-        cp -f "$RES" /data/global/systemResources/
-        chmod 644 /system/app/ohos.global.systemres/SystemResources.hap \
-                  /system/app/SystemResources/SystemResources.hap \
-                  /data/global/systemResources/SystemResources.hap
-        echo "  SystemResources.hap"
-    else
-        echo "  не найдено: SystemResources.hap"
-    fi
-
     echo "служба наблюдения за параметрами"
     copy_out "$LIB" libparam_watcher.z.so
     cp -f "$TREE"/base/startup/init/services/param/watcher/sa_profile/param_watcher.json \
@@ -344,138 +400,26 @@ EOF
     copy_out "$LIB" libdistributeddataservice.z.so
     cp -f "$TREE"/foundation/distributeddatamgr/datamgr_service/services/distributeddataservice/sa_profile/1301.json \
           /system/profile/distributeddata.json 2>/dev/null
+    mkdir -p /system/etc/distributeddata/conf
+    cp -f "$TREE"/foundation/distributeddatamgr/datamgr_service/conf/config.json \
+          /system/etc/distributeddata/conf/ && echo "  config.json"
 
     echo "оконная схема сцены"
     copy_out "$LIB" \
         libsms.z.so libscreen_session_manager.z.so libscene_session_manager.z.so \
         libsession_manager.z.so libsession_manager_lite.z.so libsession_manager_service.z.so
 
-    echo "признак режима сцены"
-    cp -f "$OUT"/obj/foundation/window/window_manager/etc/sceneboard.config /system/etc/ 2>/dev/null
-    # Код читает файл по корневому пути /etc/sceneboard.config. На устройстве
-    # /etc — ссылка на /system/etc, у нас это каталог хозяйской системы,
-    # поэтому связываем явно.
-    ln -sf /system/etc/sceneboard.config /etc/sceneboard.config
-    echo "  $(cat /etc/sceneboard.config 2>/dev/null)"
-
-    echo "рабочий стол"
-    #local SCB="$TREE/applications/standard/hap/sceneboard/SceneBoard.hap"
-    local SCB="$TREE/foundation/window/window_scene_board/product/pc/build/default/outputs/default/pc_sceneboard-default-signed.hap"
-    if [ -s "$SCB" ] && [ "$(stat -c %s "$SCB")" -gt 100000 ]; then
-        mkdir -p /system/app/SceneBoard
-        cp -f "$SCB" /system/app/SceneBoard/
-        chmod 644 /system/app/SceneBoard/SceneBoard.hap
-        echo "  SceneBoard.hap"
-    else
-        echo "  SceneBoard.hap отсутствует или это заглушка git-lfs (нужен git lfs pull)"
-    fi
-
-
-
-
-    echo "модули NAPI: общие"
-    copy_out "$LIB/module" \
-        libdeviceinfo.z.so libsystemparameterenhance.z.so \
-        libi18n.z.so libhitracechain_napi.z.so \
-        libsettings.z.so libcommoneventmanager.z.so libscreenlock.z.so\
-        libcommonevent.z.so libhisysevent_napi.z.so\
-        libconfigpolicy.z.so libeffectkit.z.so libwallpaper.z.so \
-        libsessionmanagerservice_napi.z.so libtransactionmanager_napi.z.so
-
-    echo "модули NAPI: звук, учётные записи, ввод"
-    copy_out "$LIB/module/multimedia"      libaudio.z.so
-    #copy_out "$LIB/module/account"         libosaccount.z.so
-    copy_out "$LIB/module/multimodalinput" libinputmonitor.z.so libkeycode.z.so libkeyevent.z.so
-
-    echo "модули NAPI: контейнеры"
-    copy_out "$LIB/module/util" \
-        libarraylist.z.so libdeque.z.so libqueue.z.so libvector.z.so \
-        liblinkedlist.z.so liblist.z.so libstack.z.so libstruct.z.so \
-        libtreemap.z.so libtreeset.z.so libhashmap.z.so libhashset.z.so \
-        liblightweightmap.z.so liblightweightset.z.so libplainarray.z.so
-
-
-    #copy_out "$LIB/module/bundle"          libbundlemanager.z.so
-    #copy_out "$LIB/module/data"            libpreferences.z.so
-    #copy_out "$LIB/module/multimedia"      libimage.z.so
-    copy_out "$LIB/module/resourceschedule" libworkscheduler.z.so
-    copy_out "$LIB/module/bundle" libbundlemanager.z.so libbundleresourcemanager.z.so
-    copy_out "$LIB/module/data"   libpreferences.z.so librelationalstore.z.so
-
-    copy_out "$LIB/module/bundle" libbundlemanager.z.so libbundleresourcemanager.z.so
-    copy_out "$LIB/module/data"   libpreferences.z.so librelationalstore.z.so
-
     echo "менеджер пакетов"
     copy_out "$LIB" libbms.z.so
 
-    echo "модули NAPI: питание, уведомления, пакеты"
-    copy_out "$LIB/module" \
-        libpower.z.so libthermal.z.so libnotificationmanager.z.so libbundle.z.so
+    echo "служба блокировки экрана"
+    copy_out "$LIB" libscreenlock_server.z.so
+    cp -f "$TREE"/base/theme/screenlock_mgr/sa_profile/3704.json \
+          /system/profile/screenlock_server.json 2>/dev/null
 
-    copy_out "$LIB/module/bundle" \
-        libbundlemanager.z.so libbundleresourcemanager.z.so \
-        libbundlemonitor.z.so libinstaller.z.so \
-        liblauncherbundlemanager.z.so libshortcutmanager.z.so
-
-    copy_out "$LIB/module/app/form" libformhost.z.so
-
-
-    copy_out "$LIB/module/events"   libemitter.z.so
-    copy_out "$LIB/module/graphics" libdisplaysync.z.so libdrawing_napi.z.so
-    copy_out "$LIB/module/app/form" libformhost.z.so libforminfo.z.so
-
-
-    copy_out "$LIB/module/data" \
-        libpreferences.z.so librelationalstore.z.so \
-        libuniformtypedescriptor_napi.z.so
-
-
-
-    echo "настройки оконной подсистемы"
-    mkdir -p /system/etc/window/resources
-    cp -f "$TREE"/foundation/window/window_manager/resources/config/other/window_manager_config.xml \
-          "$TREE"/foundation/window/window_manager/resources/config/other/display_manager_config.xml \
-          /system/etc/window/resources/ 2>/dev/null && echo "  window/display config"
-
-
-# подчищаем неверно разложенные копии прошлых заходов
-rm -f "$LIB"/module/multimedia/libimage_napi.z.so
-    echo "наши системные файлы"
-    mkdir -p /system/etc/app /system/etc/sandbox
-    cp -f "$SCRIPT_DIR"/etc/install_list.json \
-          "$SCRIPT_DIR"/etc/install_list_capability.json \
-          "$SCRIPT_DIR"/etc/install_list_permissions.json \
-          /system/etc/app/ 2>/dev/null && echo "  списки предустановки"
-    cp -f "$SCRIPT_DIR"/etc/appdata-sandbox.json /system/etc/sandbox/ \
-          2>/dev/null && echo "  песочница приложений"
-
-
-
-
-echo "хранилище настроек"
-mkdir -p /system/app/SettingsData
-cp -f "$TREE"/applications/standard/hap/SettingsData.hap /system/app/SettingsData/
-chmod 644 /system/app/SettingsData/SettingsData.hap
-
-
-echo "настройки службы распределённых данных"
-mkdir -p /system/etc/distributeddata/conf
-cp -f "$TREE"/foundation/distributeddatamgr/datamgr_service/conf/config.json \
-      /system/etc/distributeddata/conf/ && echo "  config.json"
-
-
-echo "служба блокировки экрана"
-copy_out "$LIB" libscreenlock_server.z.so
-cp -f "$TREE"/base/theme/screenlock_mgr/sa_profile/3704.json \
-      /system/profile/screenlock_server.json 2>/dev/null
-
-
-
-echo "служба проверки подлинности"
-copy_out "$LIB" libuserauthservice.z.so
-
-
-python3 - "$TREE" <<'EOF'
+    echo "служба проверки подлинности"
+    copy_out "$LIB" libuserauthservice.z.so
+    python3 - "$TREE" <<'EOF'
 import json, sys
 tree = sys.argv[1]
 sa = []
@@ -486,16 +430,11 @@ json.dump({"process": "useriam", "systemability": sa},
           open("/system/profile/useriam.json", "w"), indent=4)
 EOF
 
-
-
-
-
-echo "служба управления питанием"
-copy_out "$LIB" libpowermgrservice.z.so
-#cp -f "$TREE"/base/powermgr/power_manager/sa_profile/3301.json \
-#      /system/profile/powermgr.json 2>/dev/null
-
-python3 - "$TREE" <<'EOF'
+    echo "служба управления питанием"
+    copy_out "$LIB" libpowermgrservice.z.so libdisplaymgrservice.z.so
+    copy_out "$BIN" power-shell
+    # 3301 (питание) и 3308 (состояние экрана) живут в одном процессе.
+    python3 - "$TREE" <<'EOF'
 import json, sys
 tree = sys.argv[1]
 sa = []
@@ -507,21 +446,11 @@ json.dump({"process": "powermgr", "systemability": sa},
           open("/system/profile/powermgr.json", "w"), indent=4)
 EOF
 
-
-
-
-copy_out "$LIB" libdisplaymgrservice.z.so
-copy_out "$BIN" power-shell
-
-mkdir -p /system/app/Settings
-cp -f "$TREE"/applications/standard/hap/sceneboard/Settings.hap /system/app/Settings/
-
-
-
-copy_out lib64 libaudio_policy_service.z.so libaudio_service.z.so \
-               libaudio_proxy_6.1.z.so libeffect_proxy_1.0.z.so libdaudio_proxy_1.0.z.so
-
-python3 - "$TREE" <<'EOF'
+    echo "звук"
+    copy_out "$LIB" libaudio_policy_service.z.so libaudio_service.z.so \
+                    libaudio_proxy_6.1.z.so libeffect_proxy_1.0.z.so libdaudio_proxy_1.0.z.so
+    # 3001 (вывод) и 3009 (правила) тоже в одном процессе.
+    python3 - "$TREE" <<'EOF'
 import json, sys
 tree = sys.argv[1]
 sa = []
@@ -532,101 +461,159 @@ json.dump({"process": "audio_server", "systemability": sa},
           open("/system/profile/audio_server.json", "w"), indent=4)
 EOF
 
+    mkdir -p /system/etc/audio
+    install -m 644 "$TREE"/foundation/multimedia/audio_framework/services/audio_policy/server/infra/config/file/*.xml \
+            /system/etc/audio/
 
+    mkdir -p /vendor/etc/audio /vendor/etc/hdfconfig /chip_prod/etc/hdfconfig /chip_prod/etc/audio
+    local V="$TREE/vendor/ohemu/virt/hals/audio"
+    install -m 644 "$TREE"/vendor/ohemu/virt/hals/audio/config/x86_64/*.xml /vendor/etc/audio/
+    install -m 644 "$V"/audio_adapter.json "$V"/audio_paths.json \
+                   "$V"/alsa_adapter.json "$V"/alsa_paths.json /vendor/etc/hdfconfig/
+    install -m 644 "$V"/audio_effect.json /chip_prod/etc/hdfconfig/
+    install -m 644 "$V"/config/audio_policy_config_new.xml \
+                   /chip_prod/etc/audio/audio_policy_config.xml
 
-mkdir -p /system/etc/audio
-cp -f "$TREE"/foundation/multimedia/audio_framework/services/audio_policy/server/infra/config/file/*.xml \
-      /system/etc/audio/
-chmod 644 /system/etc/audio/*.xml
+    install_bluetooth
 
-mkdir -p /vendor/etc/audio
-cp -f "$TREE"/vendor/ohemu/virt/hals/audio/config/x86_64/*.xml /vendor/etc/audio/
-chmod 644 /vendor/etc/audio/*.xml
+    # -----------------------------------------------------------------------
+    # Настройки, признаки, пакеты
+    # -----------------------------------------------------------------------
+    echo "настройки оконной подсистемы"
+    mkdir -p /system/etc/window/resources
+    cp -f "$TREE"/foundation/window/window_manager/resources/config/other/window_manager_config.xml \
+          "$TREE"/foundation/window/window_manager/resources/config/other/display_manager_config.xml \
+          /system/etc/window/resources/ 2>/dev/null
+    # Настольная настройка окон вместо заводской заглушки. Обрамление окна
+    # (полоса с кнопками) рисует ArkUI, и в настольном наборе оно выключено —
+    # включаем обратно, иначе у окон пропадают кнопки.
+    install -m 644 "$TREE"/vendor/hihope/2in1_core_system/window_config/window_manager_config.xml \
+            /system/etc/window/resources/window_manager_config.xml
+    sed -i 's/<decor enable="false">/<decor enable="true">/' \
+            /system/etc/window/resources/window_manager_config.xml
+    echo "  window/display config"
 
+    echo "признак режима сцены"
+    cp -f "$OUT"/obj/foundation/window/window_manager/etc/sceneboard.config /system/etc/ 2>/dev/null
+    # Код читает файл по корневому пути /etc/sceneboard.config.
+    ln -sf /system/etc/sceneboard.config /etc/sceneboard.config
+    echo "  $(cat /etc/sceneboard.config 2>/dev/null)"
 
-
-
-
-
-mkdir -p /vendor/etc/hdfconfig /chip_prod/etc/hdfconfig /chip_prod/etc/audio
-V="$TREE/vendor/ohemu/virt/hals/audio"
-cp -f "$V"/audio_adapter.json "$V"/audio_paths.json \
-      "$V"/alsa_adapter.json "$V"/alsa_paths.json  /vendor/etc/hdfconfig/
-cp -f "$V"/audio_effect.json                        /chip_prod/etc/hdfconfig/
-cp -f "$V"/config/audio_policy_config_new.xml       /chip_prod/etc/audio/audio_policy_config.xml
-chmod 644 /vendor/etc/hdfconfig/*.json /chip_prod/etc/hdfconfig/*.json /chip_prod/etc/audio/*.xml
-
-
-# вид оконного поведения: свободные окна вместо телефонных
-cat > /system/etc/param/arkvm.para <<'EOF'
+    echo "наши системные параметры"
+    cat > /system/etc/param/arkvm.para <<'EOF'
+# свободные окна вместо телефонных
 const.window.multiWindowUIType=FreeFormMultiWindow
+# Распорядитель пакетов сверяет тип устройства с перечнем внутри пакета.
+# Стенд у нас разом и настольный, и планшетный, и телефонный, поэтому
+# перечисляем всё — иначе пакеты для иного типа не установятся.
+const.bms.supportAppTypes=default,phone,tablet,2in1
 const.global.language=en-Latn-US
 const.global.locale=en-Latn-US
 const.global.region=US
 EOF
-chmod 644 /system/etc/param/arkvm.para
+    chmod 644 /system/etc/param/arkvm.para
 
-# настройка окон от настольного продукта вместо заводской заглушки
-cp -f "$TREE"/vendor/hihope/2in1_core_system/window_config/window_manager_config.xml \
-      /system/etc/window/resources/window_manager_config.xml
-chmod 644 /system/etc/window/resources/window_manager_config.xml
+    echo "наши системные файлы"
+    mkdir -p /system/etc/app /system/etc/sandbox
+    cp -f "$SCRIPT_DIR"/etc/install_list.json \
+          "$SCRIPT_DIR"/etc/install_list_capability.json \
+          "$SCRIPT_DIR"/etc/install_list_permissions.json \
+          /system/etc/app/ 2>/dev/null && echo "  списки предустановки"
+    cp -f "$SCRIPT_DIR"/etc/appdata-sandbox.json /system/etc/sandbox/ \
+          2>/dev/null && echo "  песочница приложений"
 
-sed -i 's/<decor enable="false">/<decor enable="true">/' \
-     /system/etc/window/resources/window_manager_config.xml
+    install_fonts
 
-#install -m 644 third_party/noto-cjk/Sans/OTC/NotoSansCJK-Regular.ttc /system/fonts/
-#install -m 644 base/global/system_resources/fonts/HMSymbolVF.ttf /system/fonts/
+    echo "системные ресурсы"
+    local RES="$OUT/obj/base/global/system_resources/systemres/SystemResources.hap"
+    install_hap /system/app/ohos.global.systemres "$RES" SystemResources.hap
+    install_hap /system/app/SystemResources       "$RES" SystemResources.hap
+    mkdir -p /data/global/systemResources
+    [ -f "$RES" ] && install -m 644 "$RES" /data/global/systemResources/
 
+    echo "рабочий стол"
+    install_hap /system/app/SceneBoard \
+        "$TREE/foundation/window/window_scene_board/product/pc/build/default/outputs/default/pc_sceneboard-default-signed.hap" \
+        SceneBoard.hap
 
+    echo "настройки"
+    install_hap /system/app/Settings \
+        "$TREE/applications/standard/hap/sceneboard/Settings.hap" Settings.hap
+    install_hap /system/app/SettingsData \
+        "$TREE/applications/standard/hap/SettingsData.hap" SettingsData.hap
 
-#grep -oE '"[A-Za-z0-9 _-]+\.tt[fc]"' /system/etc/fontconfig.json | tr -d '"' | sort -u | while read f; do
-#  [ -f "/system/fonts/$f" ] && continue
-#  src=$(find third_party base -name "$f" -not -path "*/test/*" -not -path "*/out/*" 2>/dev/null | head -1)
-#  [ -n "$src" ] && sudo install -m 644 "$src" /system/fonts/ && echo "поставил: $f"
-#done
+    fix_owners
+    echo "готово"
+}
 
-
-    # Bluetooth: служба, слой драйверов, связь с ним и наша подставка
+install_bluetooth() {
+    echo "Bluetooth"
+    local lib src
+    # Служба и обе половины связи с драйвером. Без обёртки
+    # libbluetooth_hci_proxy_1.0.z.so служба не стартует вовсе:
+    # её описание требует наличия этого файла (min_hdi_proxy_version).
     for lib in libbluetooth_server.z.so libbluetooth_hci_proxy_1.0.z.so \
                libbluetooth_hci_stub_1.0.z.so; do
-        src=$(find "$TREE/out/arkvm" -name "$lib" -not -path "*/clang_x64/*" | head -1)
-        if [ -n "$src" ]; then install -m 644 "$src" /system/lib64/; else echo "нет: $lib"; fi
+        src=$(find_out "$lib")
+        if [ -n "$src" ]; then install -m 644 "$src" "$LIB"/ && echo "  $lib"
+        else echo "  не найдено: $lib"; fi
     done
 
-    for lib in libhci_interface_service_1.0.z.so libbluetooth_hci_hdi_driver.z.so libbt_vendor.z.so; do
-        src=$(find "$TREE/out/arkvm" -name "$lib" -not -path "*/clang_x64/*" | head -1)
+    # Слой драйверов, его загружаемая часть и наша подставка вместо
+    # вендорской библиотеки. Кладём и в /vendor/lib64 (там их ищет хост),
+    # и в /system/lib64 (оттуда подставка открывается обычным поиском).
+    for lib in libhci_interface_service_1.0.z.so libbluetooth_hci_hdi_driver.z.so \
+               libbt_vendor.z.so; do
+        src=$(find_out "$lib")
         if [ -n "$src" ]; then
-            install -m 644 "$src" /vendor/lib64/
-            install -m 644 "$src" /system/lib64/
+            install -m 644 "$src" "$VLIB"/
+            install -m 644 "$src" "$LIB"/
+            echo "  $lib"
         else
-            echo "нет: $lib"
+            echo "  не найдено: $lib"
         fi
     done
 
     install -m 644 "$TREE/foundation/communication/bluetooth_service/sa_profile/1130.json" \
-        /system/profile/bluetooth_service.json
+            /system/profile/bluetooth_service.json
+
+    # Настройки службы лежат в изменяемом разделе: она их правит сама,
+    # запоминая сопряжённые устройства. Поэтому кладём только недостающие.
+    mkdir -p /data/service/el1/public/bluetooth
+    chmod 770 /data/service/el1/public/bluetooth
+    local f
+    for f in bt_config.xml bt_device_config.xml bt_profile_config.xml bt_device_info.xml; do
+        [ -f "/data/service/el1/public/bluetooth/$f" ] && continue
+        install -m 660 \
+            "$TREE/foundation/communication/bluetooth_service/services/bluetooth/etc/init/$f" \
+            /data/service/el1/public/bluetooth/
+    done
+
+    src=$(find_out libbluetooth_hdi_adapter.z.so)
+    if [ -n "$src" ]; then
+        install -m 644 "$src" "$LIB"/
+        # Стек ищет переходник под именем без окончания «.z».
+        ln -sf libbluetooth_hdi_adapter.z.so "$LIB"/libbluetooth_hdi_adapter.so
+        echo "  libbluetooth_hdi_adapter.z.so"
+    else
+        echo "  не найдено: libbluetooth_hdi_adapter.z.so"
+    fi
 
 
 
-    echo "готово"
 }
-
 
 # ---------------------------------------------------------------------------
 # Останов и сброс состояния
 # ---------------------------------------------------------------------------
 stop_all() {
+    local p
     pkill -f "$BIN/" 2>/dev/null
 
-    #for p in accesstoken_service installs storage_manager accountmgr foundation bms \
-    #         appspawn composer_host allocator_host param_watcher inputmethod_service \
-    #         distributeddata com.ohos.sceneboard; do
-
-       for p in accesstoken_service installs storage_manager accountmgr foundation bms \
+    for p in accesstoken_service installs storage_manager accountmgr foundation bms \
              appspawn composer_host allocator_host param_watcher inputmethod_service \
-             distributeddata screenlock_server useriam powermgr com.ohos.sceneboard; do
-
-
+             distributeddata screenlock_server useriam powermgr audio_server \
+             bluetooth_service com.ohos.sceneboard; do
         pkill -f "^$p" 2>/dev/null
     done
 
@@ -637,22 +624,31 @@ stop_all() {
         /data/service/el1/public/account/100/account_info.json 2>/dev/null
     rm -f "$TOKEN_BYPID"/*
 
-    systemctl stop ohos-audio_host ohos-power_host ohos-composer_host ohos-allocator_host ohos-useriam_host 2>/dev/null
-    systemctl stop ohos-render_service 2>/dev/null
-    systemctl stop bluetooth
+    systemctl stop ohos-bluetooth_host ohos-audio_host ohos-power_host \
+                   ohos-composer_host ohos-allocator_host ohos-useriam_host \
+                   ohos-render_service 2>/dev/null
     pkill -f multimodalinput
     pkill -f sa_main
     pkill -x audio_server
-
+    pkill -f "svc_ctl.sh" 
+    #pkill -x bluetooth_service
 }
 
 # Стирать после любого изменения списка процессов или прав в token_init.cpp.
-# Вместе с базой пропадают маркеры установленных приложений — их придётся
-# выдать заново переустановкой пакетов.
 reset_tokens() {
     rm -f  /data/service/el1/public/access_token/*.db*
     rm -f  /data/service/el0/access_token/nativetoken.json*
     rm -rf "$TOKEN_BYNAME"
+
+    # Удостоверения приложений выдаёт распорядитель пакетов при установке
+    # и хранит их в том же хранилище. Стерев хранилище, обязаны стереть и
+    # его состояние, иначе он сочтёт пакеты установленными, а их
+    # удостоверений уже не будет — оболочка не запустится вовсе.
+    rm -rf /data/service/el1/public/bms/bundle_manager_service/*
+    rm -rf /data/app/el1/bundle/public/*
+    rm -rf /data/app/el1/100/base/*
+    rm -rf /data/app/el1/100/database/*
+    fix_owners
 }
 
 # Полный сброс. Учтите: учётная запись 100 создастся заново уже после
@@ -662,7 +658,6 @@ reset_state() {
     rm -rf /data/service/el1/public/account
     rm -rf /dev/__parameters__
 }
-
 
 # ---------------------------------------------------------------------------
 # Маркеры доступа
@@ -695,7 +690,6 @@ TOKEN_WRAPPER='
     exec "$@"
 '
 
-
 # ---------------------------------------------------------------------------
 # Ожидания и запуск
 # ---------------------------------------------------------------------------
@@ -716,15 +710,6 @@ wait_sa() {
     return 1
 }
 
-
-#wait_sa() {
-#    for _ in $(seq 1 150); do
-#        "$SAMGR_CLIENT" 2>/dev/null | grep -qx "  $1" && return 0
-#        sleep 0.2
-#    done
-#    return 1
-#}
-
 start_bg() {
     local name=$1; shift
     "$@" > "$LOGDIR/$name.log" 2>&1 &
@@ -742,15 +727,7 @@ start_hdf() {
         && echo "  $name" || echo "  $name не запустился"
 }
 
-#start_sa() {
-#    local name=$1 id=$2
-#    echo "$name ($id)"
-#    /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "/system/profile/$name.json" \
-#        > "$LOGDIR/$name.log" 2>&1 &
-#    echo "  pid $!"
-#    wait_sa "$id" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
-#}
-
+# Работаем от корня: службы читают свои настройки по относительным путям.
 start_sa() {
     local name=$1 id=$2 tries=${3:-150}
     echo "$name ($id)"
@@ -760,10 +737,10 @@ start_sa() {
     wait_sa "$id" "$tries" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
 }
 
-# Запуск сервиса под своим пользователем, группами и возможностями —
+# Запуск службы под своим пользователем, группами и возможностями —
 # то, что на устройстве делает init по *.cfg.
 start_sa_as() {
-    local name=$1 id=$2 uid=$3 groups=${4:-} caps=${5:-}
+    local name=$1 id=$2 uid=$3 groups=${4:-} caps=${5:-} tries=${6:-150}
     echo "$name ($id) uid=$uid"
     local opts=(--reuid "$uid" --regid "$uid")
     if [ -n "$groups" ]; then
@@ -777,22 +754,23 @@ start_sa_as() {
     fi
     # Обёртка работает от корня: кладёт маркер, затем подменяется на setpriv,
     # а тот — на sa_main. Номер процесса один на все замены.
-    /bin/bash -c "$TOKEN_WRAPPER" _ "$name" setpriv "${opts[@]}" \
-        "$SA_MAIN" "/system/profile/$name.json" \
+    ( cd / && exec /bin/bash -c "$TOKEN_WRAPPER" _ "$name" setpriv "${opts[@]}" \
+        "$SA_MAIN" "/system/profile/$name.json" ) \
         > "$LOGDIR/$name.log" 2>&1 &
     echo "  pid $!"
-    wait_sa "$id" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
+    wait_sa "$id" "$tries" || { echo "  не поднялся, см. $LOGDIR/$name.log"; exit 1; }
 }
-
 
 # ---------------------------------------------------------------------------
 case "${1:-start}" in
 stop)   stop_all; echo "остановлено"; exit 0 ;;
 status) "$SAMGR_CLIENT" 2>/dev/null; exit 0 ;;
-tokens) stop_all; reset_tokens
-        echo "токены стёрты; приложения надо переустановить (bm install -p ...)"
+tokens) [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
+        stop_all; reset_tokens
+        echo "удостоверения и состояние пакетов стёрты; следующий запуск будет долгим"
         exit 0 ;;
-reset)  stop_all; reset_state;  echo "состояние стёрто"; exit 0 ;;
+reset)  [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
+        stop_all; reset_state; echo "состояние стёрто"; exit 0 ;;
 install) [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
          install_all; exit 0 ;;
 esac
@@ -802,8 +780,11 @@ esac
 ensure_dirs
 stop_all
 
-sysctl -w kernel.pid_max=32768 >/dev/null
+# Радиомодуль может обслуживать только одного хозяина: пользовательский
+# режим HCI не откроется, пока адаптер держит BlueZ.
+systemctl stop bluetooth 2>/dev/null
 
+sysctl -w kernel.pid_max=32768 >/dev/null
 
 echo "параметры"
 start_bg param "$BIN/arkvm_param_service"
@@ -831,8 +812,16 @@ echo "samgr"
 start_bg samgr "$BIN/samgr"
 wait_samgr || { echo "  samgr не отвечает, см. $LOGDIR/samgr.log"; exit 1; }
 
+echo "присмотрщик служб (замена init)"
+#"$SCRIPT_DIR/svc_ctl.sh" &
+
+setsid "$SCRIPT_DIR/svc_ctl.sh" </dev/null >>"$LOGDIR/svc_ctl.out" 2>&1 &
+
+echo "  pid $!"
+
+
 start_sa    accesstoken_service 3503
-start_sa_as installs 511 3060 1000 chown,dac_override,fowner,sys_admin
+start_sa_as installs 511 $UID_INSTALLS 1000 chown,dac_override,fowner,sys_admin
 
 echo "storage_daemon"
 start_bg storage_daemon "$BIN/storage_daemon"
@@ -846,23 +835,10 @@ start_sa    storage_manager 5003
 # о запуске пользователя.
 start_sa    distributeddata 1301
 
-start_sa_as accountmgr 200 3058 1000
-
-#start_sa audio_server 3009 900
-
-#start_sa multimodalinput 3101
-#start_sa powermgr 3301
+start_sa_as accountmgr 200 $UID_ACCOUNT 1000
 
 sleep 1
 set_token multimodalinput
-
-#echo "appspawn"
-#start_bg appspawn "$BIN/appspawn" -mode appspawn \
-#    --process-name com.ohos.appspawn.startup --start-flags daemon --type standard \
-#    --sandbox-switch on --bundle-name com.ohos.appspawn.startup --app-operate-type operate \
-#    --render-command command --app-launch-type singleton --app-visible true
-#sleep 4
-
 
 # Подготовка среды ArkUI до ветвления: без неё набор stateMgmt
 # не попадает в рабочие потоки приложений.
@@ -871,10 +847,8 @@ set_token multimodalinput
 
 start_sa param_watcher 3901
 start_sa inputmethod_service 3703
-
 start_sa screenlock_server 3704
 start_sa useriam 901
-
 
 ( cd / && exec "$BIN/appspawn" -mode appspawn \
     --process-name com.ohos.appspawn.startup --start-flags daemon --type standard \
@@ -884,27 +858,29 @@ start_sa useriam 901
 echo "  appspawn pid $!"
 sleep 4
 
-
 echo "hdf_devmgr"
 start_bg hdf_devmgr "$BIN/hdf_devmgr"
 wait_sa 5100 || { echo "  не поднялся, см. $LOGDIR/hdf_devmgr.log"; exit 1; }
 
-# Контейнеры драйверов. На устройстве их запускает init по hdf_devhost.cfg.
-echo "драйверы дисплея"
-start_hdf allocator_host /vendor/bin/hdf_devhost -i 1 -n allocator_host
-start_hdf composer_host  /vendor/bin/hdf_devhost -i 0 -n composer_host
-start_hdf useriam_host   /vendor/bin/hdf_devhost -i 2 -n useriam_host
-start_hdf power_host /vendor/bin/hdf_devhost -i 3 -n power_host
-start_hdf audio_host /vendor/bin/hdf_devhost -i 4 -n audio_host
-start_hdf bluetooth_host /vendor/bin/hdf_devhost -i 5 -n bluetooth_host
-
+# Хосты драйверов. На устройстве их запускает init по hdf_devhost.cfg.
+# Номер -i — это порядковый номер хоста в arkvm/hdf/device_info.hcs,
+# считая с нуля. Меняя описание, не забывайте пересобрать свод hc-gen
+# и разложить его: иначе номера разъедутся.
+echo "драйверы"
+start_hdf allocator_host  /vendor/bin/hdf_devhost -i 1 -n allocator_host
+start_hdf composer_host   /vendor/bin/hdf_devhost -i 0 -n composer_host
+start_hdf useriam_host    /vendor/bin/hdf_devhost -i 2 -n useriam_host
+start_hdf power_host      /vendor/bin/hdf_devhost -i 3 -n power_host
+start_hdf audio_host      /vendor/bin/hdf_devhost -i 4 -n audio_host
+start_hdf bluetooth_host  /vendor/bin/hdf_devhost -i 5 -n bluetooth_host
 
 sleep 2
 
+# Звук ждёт своего слоя драйверов и первый раз поднимается долго.
 start_sa audio_server 3009 900
 
-# Render service обязан подняться раньше оконного менеджера: тот при старте
-# спрашивает у него список экранов. Сам он требует работающего композитора.
+# Служба отрисовки обязана подняться раньше оконного менеджера: тот при
+# старте спрашивает у неё список экранов. Сама она требует композитора.
 echo "render_service"
 systemctl reset-failed ohos-render_service 2>/dev/null
 systemctl stop ohos-render_service 2>/dev/null
@@ -918,34 +894,52 @@ systemd-run --unit=ohos-render_service --quiet \
     "$BIN/render_service"
 wait_sa 10 || { echo "  render_service не поднялся"; exit 1; }
 
-# foundation держит менеджеры способностей, приложений, пакетов, а в режиме
-# сцены ещё и службу экранов (4607) с посредником сеансов (4606).
 start_sa multimodalinput 3101
 start_sa powermgr 3301
-
 start_sa bluetooth_service 1130 300
 
-start_sa_as foundation 180 5523 1000
+# foundation держит менеджеры способностей, приложений, пакетов, а в режиме
+# сцены ещё и службу окон (4607) с посредником сеансов (4606).
+# После сброса он ставит пакеты заново — ждём дольше обычного.
+start_sa_as foundation 180 $UID_FOUNDATION 1000 "" 600
 sleep 1
 set_token foundation
 
+
+# Распорядитель пакетов обходит /system/app один раз, при своём запуске.
+# После полного сброса учётная запись 100 создаётся позже этого мига, и обход
+# отвергает все пакеты: непривилегированные нельзя ставить нулевому
+# пользователю. Дожидаемся записи и повторяем обход ещё раз.
+ACCOUNT_INFO=/data/service/el1/public/account/100/account_info.json
+if [ "$("$BIN/param" get bootevent.bms.main.bundles.ready 2>/dev/null)" != "true" ]; then
+    echo "пакеты не установлены, ждём учётную запись 100"
+    for _ in $(seq 1 120); do
+        [ -f "$ACCOUNT_INFO" ] && break
+        sleep 0.5
+    done
+    if [ -f "$ACCOUNT_INFO" ]; then
+        sleep 2
+        echo "повторный обход пакетов"
+        pkill -f "^foundation" 2>/dev/null
+        sleep 2
+        start_sa_as foundation 180 $UID_FOUNDATION 1000 "" 600
+        sleep 1
+        set_token foundation
+    else
+        echo "учётная запись 100 так и не появилась"
+    fi
+fi
+
+
+
 chmod 666 /dev/unix/socket/AppSpawn 2>/dev/null
 
-# Служба параметров нужна приложениям для подписки на системные параметры:
-# без неё каждое обращение стоит секунды ожидания на главном потоке.
-#start_sa param_watcher 3901
-
-# Служба способов ввода: текстовые поля запрашивают у неё сеанс ввода.
-#start_sa inputmethod_service 3703
-#start_sa useriam 901
-
-
-#echo "служба блокировки экрана"
-#start_sa screenlock_server 3704
-
-/system/bin/param set bootevent.boot.completed true
+"$BIN/param" set bootevent.boot.completed true
 echo
 echo "готово, реестр:"
 "$SAMGR_CLIENT" 2>/dev/null
+echo
+echo "признаки готовности:"
+"$BIN/param" get | grep -iE "bms.main.bundles.ready|wms.fullscreen.ready"
 echo
 echo "журнал:  sudo env LD_LIBRARY_PATH=$LIB $BIN/hilog"
