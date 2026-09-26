@@ -72,6 +72,9 @@ const char *PROCESSES[] = {
     "powermgr",
     "audio_server",
     "bluetooth_service",
+    "ui_service",
+    "device_manager",
+    "huks_service",
 };
 
 constexpr const char *BYNAME_DIR = "/data/service/el0/access_token/byname";
