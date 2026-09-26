@@ -1,0 +1,9 @@
+import("//build/ohos.gni")
+
+ohos_shared_library("bt_vendor") {
+  sources = [ "bt_vendor.cpp" ]
+  include_dirs = [ "//drivers/peripheral/bluetooth/hci/hdi_service/implement" ]
+  install_enable = true
+  subsystem_name = "hdf"
+  part_name = "drivers_peripheral_bluetooth"
+}
