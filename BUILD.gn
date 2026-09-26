@@ -482,6 +482,30 @@ group("all") {
     "//drivers/peripheral/bluetooth/hci/hdi_service:libbluetooth_hci_hdi_driver",
     "//drivers/interface/bluetooth/hci/v1_0:libbluetooth_hci_proxy_1.0",
     "//drivers/interface/bluetooth/hci/v1_0:libbluetooth_hci_stub_1.0",
+    "//arkvm/bt_vendor:bt_vendor",
+
+
+
+
+
+
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/a2dp:a2dp",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/ble:ble",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/hid:hid",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/pan:pan",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/socket:socket",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/base_profile:baseprofile",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/hfp:hfp",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/bas:bas",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/map:map",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/opp:opp",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/pbap:pbap",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/audio_manager:weardetection",
+    "//foundation/communication/bluetooth/frameworks/js/napi/src/common:common",
+
+    "//foundation/distributedhardware/device_manager:device_manager",
+    "//base/security/huks:service_group",
+    "//foundation/arkui/ui_appearance:ui_appearance_packages",
 
 
 ]
