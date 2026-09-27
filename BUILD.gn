@@ -507,6 +507,19 @@ group("all") {
     "//base/security/huks:service_group",
     "//foundation/arkui/ui_appearance:ui_appearance_packages",
 
+    "//drivers/peripheral/huks/hdi_service:huks_hdi_service",
+
+    "//foundation/communication/wifi/wifi/services/wifi_standard/wifi_framework:wifi_manage",
+    "//foundation/communication/wifi/wifi/services/wifi_standard/wifi_framework:wifi_system_ability",
+
+
+    "//base/powermgr/battery_manager/services:service",
+    "//base/powermgr/battery_manager/sa_profile:batterymgr_sa_profile",
+    "//base/powermgr/battery_manager/frameworks:battery_napi",
+    "//base/powermgr/battery_manager/interfaces/inner_api:batterysrv_client",
+    "//drivers/interface/battery/v2_0:libbattery_proxy_2.0",
+    "//drivers/peripheral/battery:battery_entry",
+
 
 ]
 }
