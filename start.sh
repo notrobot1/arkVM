@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE="$(dirname "$SCRIPT_DIR")"
 OUT=${OUT:-$TREE/out/arkvm}
 
+DATA_IMG=${DATA_IMG:-/var/lib/arkvm/data.img}
+DATA_IMG_SIZE=${DATA_IMG_SIZE:-8G}
+
+
 export LD_LIBRARY_PATH=/system/lib64:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough
 
 SAMGR_CLIENT=$BIN/samgr_client
@@ -36,6 +40,36 @@ UID_ACCOUNT=3058      # менеджер учётных записей
 UID_INSTALLS=3060     # установщик пакетов
 UID_FOUNDATION=5523   # foundation, в нём же распорядитель пакетов
 UID_DDATA=3012        # служба распределённых данных
+
+
+
+
+
+
+
+
+# Раздел данных отдельным образом. На устройстве /data — свой раздел, и весь
+# учёт места построен на этом. У нас без него корень хозяйской системы
+# считается разделом данных, объём выходит вдвое больше настоящего, а любое
+# переполнение корня валит стенд.
+ensure_data_mount() {
+    mountpoint -q /data && return 0
+
+    if [ ! -f "$DATA_IMG" ]; then
+        mkdir -p "$(dirname "$DATA_IMG")"
+        echo "создаю образ раздела данных $DATA_IMG на $DATA_IMG_SIZE"
+        fallocate -l "$DATA_IMG_SIZE" "$DATA_IMG" 2>/dev/null || truncate -s "$DATA_IMG_SIZE" "$DATA_IMG"
+        mkfs.ext4 -q -F -L arkvm-data "$DATA_IMG" || { echo "не удалось разметить образ"; exit 1; }
+    fi
+
+    mkdir -p /data
+    mount -o loop,noatime "$DATA_IMG" /data || { echo "не удалось подключить образ данных"; exit 1; }
+    echo "раздел данных: $(df -h /data | tail -1)"
+}
+
+
+
+
 
 # ---------------------------------------------------------------------------
 # Каталоги, которые на устройстве создаёт init по описаниям в *.cfg.
@@ -153,7 +187,31 @@ ensure_dirs() {
 
     mkdir -p /data/service/el1/public/bluetooth
     chmod 770 /data/service/el1/public/bluetooth
+
+    mkdir -p /data/service/el1/public/huks_service
+    chmod 700 /data/service/el1/public/huks_service
+
+
+    chown -R $UID_INSTALLS:$UID_INSTALLS /data/app/el2/$u/sharefiles
+    chmod 0711 /data/app/el2/$u/sharefiles
+
+    mkdir -p /data/service/el1/public/wifi
+    chmod 770 /data/service/el1/public/wifi
+
 }
+
+
+
+# как start_sa, но при неудаче не обрывает запуск
+start_sa_opt() {
+    local name=$1 id=$2 tries=${3:-150}
+    echo "$name ($id), необязательная"
+    ( cd / && exec /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "/system/profile/$name.json" ) \
+        > "$LOGDIR/$name.log" 2>&1 &
+    echo "  pid $!"
+    wait_sa "$id" "$tries" || echo "  не поднялась, продолжаю без неё"
+}
+
 
 # Владельцы и права каталогов, которые проверяет installd. Вынесено отдельно:
 # после сброса состояния их надо восстанавливать, иначе распорядитель пакетов
@@ -228,6 +286,45 @@ install_fonts() {
     # на них спотыкается.
     find /system/fonts -size -10k -delete 2>/dev/null
 }
+
+
+install_battery() {
+    echo "батарея"
+    local lib src
+    # Служба 3302 и обёртка вызовов к драйверному слою. Обёртка обязательна:
+    # в описании стоит min_hdi_proxy_version с этим именем, и без файла
+    # диспетчер способность просто не поднимет.
+    for lib in libbatteryservice.z.so libbattery_notification.z.so \
+               libbatterysrv_client.z.so libbattery_proxy_2.0.z.so \
+               libbattery_stub_2.0.z.so; do
+        src=$(find_out "$lib")
+        if [ -n "$src" ]; then install -m 644 "$src" "$LIB"/ && echo "  $lib"
+        else echo "  не найдено: $lib"; fi
+    done
+
+    # Драйверный слой: его ищет хост в /vendor/lib64.
+    for lib in libbattery_interface_service_2.0.z.so libbattery_driver.z.so; do
+        src=$(find_out "$lib")
+        if [ -n "$src" ]; then
+            install -m 644 "$src" "$VLIB"/
+            install -m 644 "$src" "$LIB"/
+            echo "  $lib"
+        else
+            echo "  не найдено: $lib"
+        fi
+    done
+
+    # Модули для приложений: через них настройки спрашивают @ohos.batteryInfo.
+    copy_out "$LIB/module" libbatteryinfo.z.so libbattery.z.so libcharger.z.so
+
+    # Пороги заряда, значки и прочие числа, которые служба читает при запуске.
+    mkdir -p /vendor/etc/battery
+    install -m 644 \
+        "$TREE"/base/powermgr/battery_manager/services/native/profile/*.json \
+        /vendor/etc/battery/ 2>/dev/null
+}
+
+
 
 install_all() {
     [ -d "$OUT" ] || { echo "нет каталога сборки: $OUT"; exit 1; }
@@ -522,7 +619,7 @@ EOF
     cp -f "$SCRIPT_DIR"/etc/appdata-sandbox.json /system/etc/sandbox/ \
           2>/dev/null && echo "  песочница приложений"
 
-    install_fonts
+#    install_fonts
 
     echo "системные ресурсы"
     local RES="$OUT/obj/base/global/system_resources/systemres/SystemResources.hap"
@@ -543,6 +640,68 @@ EOF
         "$TREE/applications/standard/hap/SettingsData.hap" SettingsData.hap
 
     fix_owners
+
+
+    install -m 644 "$TREE/foundation/arkui/ui_appearance/sa_profile/7002.json" \
+            /system/profile/ui_service.json
+    install -m 644 "$TREE/foundation/distributedhardware/device_manager/sa_profile/4802.json" \
+            /system/profile/device_manager.json
+    install -m 644 "$TREE/base/security/huks/services/huks_standard/huks_service/main/os_dependency/sa/sa_profile/3510.json" \
+            /system/profile/huks_service.json
+
+
+    echo "Wi-Fi"
+    copy_out "$LIB" libwifi_device_ability.z.so
+    #install -m 644 \
+    #    "$TREE/foundation/communication/wifi/wifi/services/wifi_standard/sa_profile/1120.json" \
+    #    /system/profile/wifi_manager_service.json
+
+
+        python3 - "$TREE" <<'EOF'
+import json, sys, glob
+tree = sys.argv[1]
+d = f"{tree}/foundation/communication/wifi/wifi/services/wifi_standard/sa_profile"
+sa = []
+for p in sorted(glob.glob(f"{d}/[0-9]*.json")):
+    with open(p) as f:
+        for item in json.load(f)["systemability"]:
+            # На стенде поднимаем все способности Wi-Fi сразу: загрузка по
+            # требованию работает только для одной за запуск процесса, а
+            # диспетчер просит их по очереди у уже работающего — и не
+            # дожидается. Памяти это стоит немного.
+            item["run-on-create"] = True
+            sa.append(item)
+json.dump({"process": "wifi_manager_service", "systemability": sa},
+          open("/system/profile/wifi_manager_service.json", "w"), indent=4)
+print("  способностей Wi-Fi:", len(sa))
+EOF
+
+
+
+
+    echo "служба управления питанием"
+    copy_out "$LIB" libpowermgrservice.z.so libdisplaymgrservice.z.so
+    copy_out "$BIN" power-shell
+    # 3301 (питание), 3308 (состояние экрана) и 3302 (заряд батареи)
+    # живут в одном процессе — описание батареи так и говорит: "process": "powermgr".
+    python3 - "$TREE" <<'EOF'
+import json, sys, glob
+tree = sys.argv[1]
+paths = [f"{tree}/base/powermgr/power_manager/sa_profile/3301.json",
+         f"{tree}/base/powermgr/display_manager/state_manager/sa_profile/3308.json"]
+paths += sorted(glob.glob(f"{tree}/base/powermgr/battery_manager/sa_profile/*.json"))
+sa = []
+for p in paths:
+    with open(p) as f:
+        sa += json.load(f)["systemability"]
+json.dump({"process": "powermgr", "systemability": sa},
+          open("/system/profile/powermgr.json", "w"), indent=4)
+EOF
+
+    install_battery
+
+
+
     echo "готово"
 }
 
@@ -624,7 +783,7 @@ stop_all() {
         /data/service/el1/public/account/100/account_info.json 2>/dev/null
     rm -f "$TOKEN_BYPID"/*
 
-    systemctl stop ohos-bluetooth_host ohos-audio_host ohos-power_host \
+    systemctl stop ohos-battery_host ohos-bluetooth_host ohos-audio_host ohos-power_host \
                    ohos-composer_host ohos-allocator_host ohos-useriam_host \
                    ohos-render_service 2>/dev/null
     pkill -f multimodalinput
@@ -653,11 +812,19 @@ reset_tokens() {
 
 # Полный сброс. Учтите: учётная запись 100 создастся заново уже после
 # старта BMS, поэтому после reset нужен второй запуск.
+#reset_state() {
+#    reset_tokens
+#    rm -rf /data/service/el1/public/account
+#    rm -rf /dev/__parameters__
+#}
+
+
 reset_state() {
-    reset_tokens
-    rm -rf /data/service/el1/public/account
-    rm -rf /dev/__parameters__
+    umount /data 2>/dev/null
+    mkfs.ext4 -q -F -L arkvm-data "$DATA_IMG"
+    echo "раздел данных размечен заново"
 }
+
 
 # ---------------------------------------------------------------------------
 # Маркеры доступа
@@ -777,6 +944,7 @@ esac
 
 [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
 
+ensure_data_mount
 ensure_dirs
 stop_all
 
@@ -835,6 +1003,8 @@ start_sa    storage_manager 5003
 # о запуске пользователя.
 start_sa    distributeddata 1301
 
+sleep 6
+start_sa    huks_service 3510 
 start_sa_as accountmgr 200 $UID_ACCOUNT 1000
 
 sleep 1
@@ -871,6 +1041,7 @@ start_hdf allocator_host  /vendor/bin/hdf_devhost -i 1 -n allocator_host
 start_hdf composer_host   /vendor/bin/hdf_devhost -i 0 -n composer_host
 start_hdf useriam_host    /vendor/bin/hdf_devhost -i 2 -n useriam_host
 start_hdf power_host      /vendor/bin/hdf_devhost -i 3 -n power_host
+start_hdf battery_host /vendor/bin/hdf_devhost -i 6 -n battery_host
 start_hdf audio_host      /vendor/bin/hdf_devhost -i 4 -n audio_host
 start_hdf bluetooth_host  /vendor/bin/hdf_devhost -i 5 -n bluetooth_host
 
@@ -905,19 +1076,49 @@ start_sa_as foundation 180 $UID_FOUNDATION 1000 "" 600
 sleep 1
 set_token foundation
 
+start_sa ui_service 7002
+# start_sa device_manager 4802
+start_sa_opt wifi_manager_service 1120
+
+
 
 # Распорядитель пакетов обходит /system/app один раз, при своём запуске.
 # После полного сброса учётная запись 100 создаётся позже этого мига, и обход
 # отвергает все пакеты: непривилегированные нельзя ставить нулевому
 # пользователю. Дожидаемся записи и повторяем обход ещё раз.
 ACCOUNT_INFO=/data/service/el1/public/account/100/account_info.json
-if [ "$("$BIN/param" get bootevent.bms.main.bundles.ready 2>/dev/null)" != "true" ]; then
+
+
+#if [ "$("$BIN/param" get bootevent.bms.main.bundles.ready 2>/dev/null)" != "true" ]; then
+#    echo "пакеты не установлены, ждём учётную запись 100"
+#    for _ in $(seq 1 120); do
+#        [ -f "$ACCOUNT_INFO" ] && break
+#        sleep 0.5
+#    done
+#    if [ -f "$ACCOUNT_INFO" ]; then
+#        sleep 2
+#        echo "повторный обход пакетов"
+#        pkill -f "^foundation" 2>/dev/null
+#        sleep 2
+#        start_sa_as foundation 180 $UID_FOUNDATION 1000 "" 600
+#        sleep 1
+#        set_token foundation
+#    else
+#        echo "учётная запись 100 так и не появилась"
+#    fi
+#fi
+
+# Распорядитель пакетов обходит /system/app один раз, при своём запуске.
+# После полного сброса учётная запись 100 создаётся позже этого мига, и обход
+# отвергает все пакеты. Проверяем не отметку готовности (её у нас нельзя
+# записать), а сам итог: есть ли установленные пакеты.
+if [ -z "$(ls -A /data/app/el1/bundle/public 2>/dev/null)" ]; then
     echo "пакеты не установлены, ждём учётную запись 100"
     for _ in $(seq 1 120); do
-        [ -f "$ACCOUNT_INFO" ] && break
+        [ -f /data/service/el1/public/account/100/account_info.json ] && break
         sleep 0.5
     done
-    if [ -f "$ACCOUNT_INFO" ]; then
+    if [ -f /data/service/el1/public/account/100/account_info.json ]; then
         sleep 2
         echo "повторный обход пакетов"
         pkill -f "^foundation" 2>/dev/null
@@ -929,8 +1130,6 @@ if [ "$("$BIN/param" get bootevent.bms.main.bundles.ready 2>/dev/null)" != "true
         echo "учётная запись 100 так и не появилась"
     fi
 fi
-
-
 
 chmod 666 /dev/unix/socket/AppSpawn 2>/dev/null
 
