@@ -99,7 +99,8 @@
         { "component": "napi" },
         { "component": "ace_engine_lite" },
         { "component": "ui_lite" },
-        { "component": "arkui_cangjie_wrapper" }
+        { "component": "arkui_cangjie_wrapper" },
+        { "component": "ui_appearance" }
       ]
     },
     {
@@ -179,7 +180,9 @@
     },
     {
       "subsystem": "distributedhardware",
-      "components": [ { "component": "device_manager" } ]
+      "components": [ 
+        { "component": "device_manager" }
+      ]
     },
     {
       "subsystem": "developtools",
@@ -252,7 +255,11 @@
 { "component": "drivers_interface_audio" },
 { "component": "drivers_interface_distributed_audio" },
 { "component": "drivers_peripheral_audio" },
-{ "component": "drivers_interface_wlan" }
+{ "component": "drivers_interface_wlan" },
+{ "component": "drivers_interface_huks" },
+{ "component": "drivers_peripheral_huks" },
+{ "component": "drivers_interface_battery" },
+{ "component": "drivers_peripheral_battery" }
 
       ]
     },
@@ -431,7 +438,8 @@
         { "component": "display_manager" },
         { "component": "powermgr_lite" },
         { "component": "powermgr_cangjie_wrapper" },
-        { "component": "thermal_manager" }
+        { "component": "thermal_manager" },
+        { "component": "battery_manager" }
       ]
     },
     {
