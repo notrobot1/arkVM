@@ -111,5 +111,24 @@ root {
       }
 
 
+        battery :: host {
+            hostName = "battery_host";
+            priority = 50;
+            battery_device :: device {
+                device0 :: deviceNode {
+                    policy = 2;
+                    priority = 100;
+                    moduleName = "libbattery_driver.z.so";
+                    serviceName = "battery_interface_service";
+                }
+            }
+        }
+
+
+
+
+
+
+
     }
 }
