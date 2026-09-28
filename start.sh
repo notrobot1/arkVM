@@ -702,6 +702,14 @@ EOF
 
 
 
+
+    # Описание режимов энергосбережения. Без него служба при запуске
+    # жалуется на отсутствие файла и переключать режимы отказывается.
+    mkdir -p /system/etc/power_config
+    install -m 644 "$TREE"/base/powermgr/power_manager/services/native/profile/power_mode_config.xml \
+            /system/etc/power_config/
+
+
     echo "готово"
 }
 
@@ -819,9 +827,52 @@ reset_tokens() {
 #}
 
 
+
+
+# Отключить всё, что подключено от образа данных. Распорядитель хранилища
+# накладывает подкаталоги /data на /storage/... и /mnt/user/100/... —
+# после отключения самого /data эти наложения остаются и держат устройство
+# петли занятым, отчего разметка отказывается работать по занятому образу.
+umount_data_image() {
+    local i dev tgt targets
+    for i in 1 2 3 4 5; do
+        targets=""
+        for dev in $(losetup -j "$DATA_IMG" -O NAME --noheadings 2>/dev/null); do
+            targets="$targets$(findmnt -rno TARGET -S "$dev" 2>/dev/null)
+"
+        done
+        targets=$(printf '%s' "$targets" | grep -v '^[[:space:]]*$' | sort -r)
+        [ -z "$targets" ] && break
+        # Отключаем от глубоких к мелким: вложенные держат внешние.
+        printf '%s\n' "$targets" | while read -r tgt; do
+            umount "$tgt" 2>/dev/null || {
+                fuser -km "$tgt" 2>/dev/null
+                sleep 1
+                umount "$tgt" 2>/dev/null
+            }
+        done
+        sleep 1
+    done
+
+    mountpoint -q /data && return 1
+    for dev in $(losetup -j "$DATA_IMG" -O NAME --noheadings 2>/dev/null); do
+        losetup -d "$dev" 2>/dev/null
+    done
+    losetup -j "$DATA_IMG" -O NAME --noheadings 2>/dev/null | grep -q . && return 1
+    return 0
+}
+
 reset_state() {
-    umount /data 2>/dev/null
-    mkfs.ext4 -q -F -L arkvm-data "$DATA_IMG"
+    stop_all
+    if ! umount_data_image; then
+        echo "не удалось отключить раздел данных, сброс отменён"
+        findmnt -rno TARGET,SOURCE | grep loop
+        return 1
+    fi
+    if ! mkfs.ext4 -q -F -L arkvm-data "$DATA_IMG"; then
+        echo "разметка не удалась, сброс отменён"
+        return 1
+    fi
     echo "раздел данных размечен заново"
 }
 
@@ -937,7 +988,7 @@ tokens) [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
         echo "удостоверения и состояние пакетов стёрты; следующий запуск будет долгим"
         exit 0 ;;
 reset)  [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
-        stop_all; reset_state; echo "состояние стёрто"; exit 0 ;;
+        stop_all; reset_state || exit 1; echo "состояние стёрто"; exit 0 ;;
 install) [ "$(id -u)" = 0 ] || { echo "нужен root"; exit 1; }
          install_all; exit 0 ;;
 esac
@@ -1112,7 +1163,19 @@ ACCOUNT_INFO=/data/service/el1/public/account/100/account_info.json
 # После полного сброса учётная запись 100 создаётся позже этого мига, и обход
 # отвергает все пакеты. Проверяем не отметку готовности (её у нас нельзя
 # записать), а сам итог: есть ли установленные пакеты.
-if [ -z "$(ls -A /data/app/el1/bundle/public 2>/dev/null)" ]; then
+
+
+
+#if [ -z "$(ls -A /data/app/el1/bundle/public 2>/dev/null)" ]; then
+
+
+
+# Признаком «пакеты не встали» служит отсутствие рабочего стола, а не пустота
+# каталога: com.ohos.settingsdata помечен единственным на устройство и встаёт
+# для пользователя 0 сразу, ещё до появления учётной записи 100, — каталог
+# перестаёт быть пустым, хотя ставить остальное только предстоит.
+if [ ! -d /data/app/el1/bundle/public/com.ohos.sceneboard ]; then
+
     echo "пакеты не установлены, ждём учётную запись 100"
     for _ in $(seq 1 120); do
         [ -f /data/service/el1/public/account/100/account_info.json ] && break
