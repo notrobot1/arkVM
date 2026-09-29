@@ -18,7 +18,7 @@ const char *PERMS[] = {
     "ohos.permission.LISTEN_BUNDLE_CHANGE",
     "ohos.permission.REMOVE_CACHE_FILES",
     "ohos.permission.CHANGE_ABILITY_ENABLED_STATE",
-    "ohos.permission.STORAGE_MANAGER",
+       "ohos.permission.STORAGE_MANAGER",
     "ohos.permission.STORAGE_MANAGER_CRYPT",
     "ohos.permission.MOUNT_UNMOUNT_MANAGER",
     "ohos.permission.MOUNT_FORMAT_MANAGER",
@@ -37,6 +37,22 @@ const char *PERMS[] = {
     "ohos.permission.USE_USER_IDM",
     "ohos.permission.MANAGE_USER_IDM",
     "ohos.permission.ACCESS_USER_AUTH_INTERNAL",
+    // Право распоряжаться охраняемыми настройками. Без него хранилище
+    // отклоняет и обновление записи, и её вставку — причём молча: в
+    // SettingProvider::PutStringValue ответ Insert не проверяется, и наверх
+    // уходит успех. Отсюда «записал» в журнале при вечном «не найдено».
+    "ohos.permission.MANAGE_SECURE_SETTINGS",
+    "ohos.permission.MANAGE_SETTINGS",
+
+    // Смена оформления: служба 7002 просит распорядителя приложений разослать
+    // новые настройки всем окнам. Без этого права просьба отклоняется, служба
+    // возвращает единицу, и признак persist.ace.darkmode остаётся прежним —
+    // она меняет его только после успешной рассылки.
+    "ohos.permission.UPDATE_CONFIGURATION",
+    // Наблюдение за состоянием приложений. Без него распорядитель дважды в
+    // секунду отказывает подписчику — та самая ровная жалоба в журнале.
+    "ohos.permission.RUNNING_STATE_OBSERVER",
+
 };
 
 // Имена процессов ровно те, под которыми они видны в /proc/<pid>/cmdline.
@@ -75,6 +91,7 @@ const char *PROCESSES[] = {
     "ui_service",
     "device_manager",
     "huks_service",
+    "wifi_manager_service",
 };
 
 constexpr const char *BYNAME_DIR = "/data/service/el0/access_token/byname";
