@@ -118,6 +118,27 @@ ensure_dirs() {
     mkdir -p /data/app/el2/$u/base
     mkdir -p /data/app/el2/$u/database
     mkdir -p /data/app/el2/$u/sharefiles
+
+
+    # Пользователь 0 обслуживает пакеты, помеченные единственными на устройство
+    # (com.ohos.settingsdata и подобные): они работают от его имени, а не от
+    # имени сотни. Приготовитель процессов собирает им песочницу и требует то же
+    # дерево каталогов, что и обычному пользователю. Без него сборка песочницы
+    # обрывается на середине, пакет не поднимается, и рабочий стол вечно ждёт
+    # настроек, которых не получит.
+    mkdir -p /data/app/el1/0/base
+    mkdir -p /data/app/el1/0/database
+    mkdir -p /data/app/el2/0/base
+    mkdir -p /data/app/el2/0/database
+    mkdir -p /data/app/el2/0/log
+    mkdir -p /data/app/el2/0/sharefiles
+    mkdir -p /data/app/el3/0/base
+    mkdir -p /data/app/el4/0/base
+    mkdir -p /data/app/el5/0/base
+    mkdir -p /data/service/el1/0
+    mkdir -p /data/service/el2/0
+
+
     mkdir -p /data/chipset/el2/$u/multimedia
     mkdir -p /data/service/el1/$u/{backup,for-all-app}
     mkdir -p /data/service/el2/$u/{backup,database,findnetwork,fusion_awareness}
@@ -607,6 +628,9 @@ const.bms.supportAppTypes=default,phone,tablet,2in1
 const.global.language=en-Latn-US
 const.global.locale=en-Latn-US
 const.global.region=US
+const.display.brightness.min=1
+const.display.brightness.default=102
+const.display.brightness.max=255
 EOF
     chmod 644 /system/etc/param/arkvm.para
 
@@ -708,6 +732,16 @@ EOF
     mkdir -p /system/etc/power_config
     install -m 644 "$TREE"/base/powermgr/power_manager/services/native/profile/power_mode_config.xml \
             /system/etc/power_config/
+
+
+
+
+    # Обои по умолчанию. Служба оформления отдаёт их, пока пользователь не
+    # выбрал свои, и ищет строго по этим именам — они прописаны в её коде.
+    install -m 644 \
+        "$TREE"/base/theme/wallpaper_mgr/frameworks/native/data/wallpaperdefault.jpeg \
+        "$TREE"/base/theme/wallpaper_mgr/frameworks/native/data/wallpaperlockdefault.jpeg \
+        /system/etc/
 
 
     echo "готово"
