@@ -70,6 +70,23 @@ ensure_data_mount() {
 
 
 
+# install_hap_extra <каталог> <исходный файл> <итоговое имя>
+# Дополнительный модуль того же приложения: кладём без очистки каталога.
+# Очистка нужна лишь от второго ОСНОВНОГО пакета; дополнительных же в одной
+# папке может лежать сколько угодно, распорядитель соберёт из них одно
+# приложение. Все модули обязаны совпадать по виду сборки (отладочный или
+# выпускной) и по подписи — иначе отвергается приложение целиком.
+install_hap_extra() {
+    local dir=$1 src=$2 name=$3
+    if [ ! -s "$src" ]; then
+        echo "  нет: $src"
+        return 1
+    fi
+    install -m 644 "$src" "$dir/$name" && echo "  $name"
+}
+
+
+
 
 # ---------------------------------------------------------------------------
 # Каталоги, которые на устройстве создаёт init по описаниям в *.cfg.
@@ -218,6 +235,22 @@ ensure_dirs() {
 
     mkdir -p /data/service/el1/public/wifi
     chmod 770 /data/service/el1/public/wifi
+
+
+
+    # Кладовые ближней связи. Создаёт их на устройстве init, по описанию
+    # softbus_server_musl.cfg.
+    mkdir -p /data/service/el1/public/dsoftbus
+    chmod 0771 /data/service/el1/public/dsoftbus
+    mkdir -p /data/service/el1/public/database/dsoftbus
+    chmod 2770 /data/service/el1/public/database/dsoftbus
+
+    # Кладовые приёмника событий, по описанию hiview.cfg.
+    mkdir -p /data/log/hiview/temp /data/log/faultlog/temp \
+             /data/log/faultlog/faultlogger /data/log/faultlog/freeze_ext \
+             /data/log/hitrace /data/log/reliability /data/log/hiaudit \
+             /data/system/hiview/unzip_configs/sys_event_def
+    chmod 0775 /data/log
 
 }
 
@@ -657,6 +690,25 @@ EOF
         "$TREE/foundation/window/window_scene_board/product/pc/build/default/outputs/default/pc_sceneboard-default-signed.hap" \
         SceneBoard.hap
 
+
+    # Дополнительный модуль оболочки (в описании "type": "feature"). В нём
+    # живёт способность SettingThemeComponentExtAbility — окошко, которое
+    # приложение настроек встраивает в раздел оформления рабочего стола.
+    # Без него настройки показывают заглушку «эту страницу не удалось
+    # загрузить».
+    # Кладём в тот же каталог и БЕЗ очистки: install_hap чистит папку, и
+    # вызвать его здесь нельзя — он снёс бы основной пакет. Запрет же на
+    # соседство касается только двух ОСНОВНЫХ пакетов, а тут основной один.
+    install -m 644 \
+        "$TREE/foundation/window/window_scene_board/feature/themecomponent/build/default/outputs/default/themecomponent-default-signed.hap" \
+        /system/app/SceneBoard/ThemeComponent.hap && echo "  ThemeComponent.hap"
+
+
+   local SCBSRC="$TREE/foundation/window/window_scene_board"
+       install_hap_extra /system/app/SceneBoard \
+        "$SCBSRC/feature/notification/notificationmanagement/build/default/outputs/default/default_notificationmanagement-default-signed.hap" \
+        NotificationManagement.hap
+
     echo "настройки"
     install_hap /system/app/Settings \
         "$TREE/applications/standard/hap/sceneboard/Settings.hap" Settings.hap
@@ -742,6 +794,59 @@ EOF
         "$TREE"/base/theme/wallpaper_mgr/frameworks/native/data/wallpaperdefault.jpeg \
         "$TREE"/base/theme/wallpaper_mgr/frameworks/native/data/wallpaperlockdefault.jpeg \
         /system/etc/
+
+
+    echo "модули NAPI: окно расширения"
+    # Через extensionWindow расширение получает представитель своего окна
+    # (getUIExtensionHostWindowProxy). Без модуля обращение возвращает пустоту,
+    # способность падает на первом же его использовании и уносит с собой
+    # окошко раздела оформления рабочего стола.
+        echo "модули NAPI: окно расширения"
+    # Библиотек две и путать их нельзя: libextensionwindow.z.so — это сам
+    # модуль (объявитель плюс вшитый набор extension_window.abc), а
+    # libextensionwindow_napi.z.so — его рабочая начинка из состава
+    # платформенного набора. Загрузчик, не найдя первую, пробует вторую по
+    # запасному правилу имени: она открывается, но ничего не объявляет,
+    # и обращение к extensionWindow возвращает пустоту.
+    copy_out "$LIB/module/application" libextensionwindow.z.so
+    copy_out "$LIB/platformsdk"        libextensionwindow_napi.z.so
+
+
+
+
+
+
+    echo "служба доверия между устройствами"
+    copy_out "$LIB" libdeviceauth_service.z.so
+    # Заводское описание велит поднимать службу по событиям — входу
+    # пользователя, смене учётной записи, включению радиомодуля. У нас
+    # рассылка таких событий неполна, и ждать пробуждения можно бесконечно,
+    # а без этой службы диспетчер устройств получает «способность не
+    # загружена» (12309) и не может завести список доверенных.
+    python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+with open(f"{tree}/base/security/device_auth/services/sa/sa_profile/4701.json") as f:
+    d = json.load(f)
+for item in d["systemability"]:
+    item["run-on-create"] = True
+    item.pop("start-on-demand", None)
+json.dump(d, open("/system/profile/deviceauth_service.json", "w"), indent=4)
+EOF
+
+
+
+
+
+    echo "ближняя связь"
+    copy_out "$LIB" libsoftbus_server.z.so libsoftbus_client.z.so
+    install -m 644 \
+        "$TREE/foundation/communication/dsoftbus/core/frame/standard/sa_profile/4700.json" \
+        /system/profile/softbus_server.json
+    mkdir -p /system/etc/communication/softbus
+    install -m 644 \
+        "$TREE"/foundation/communication/dsoftbus/core/common/security/permission/softbus_*.json \
+        /system/etc/communication/softbus/
 
 
     echo "готово"
@@ -830,9 +935,21 @@ stop_all() {
                    ohos-render_service 2>/dev/null
     pkill -f multimodalinput
     pkill -f sa_main
+    
     pkill -x audio_server
     pkill -f "svc_ctl.sh" 
     #pkill -x bluetooth_service
+
+    for p in accesstoken_service installs storage_manager accountmgr foundation bms \
+             appspawn composer_host allocator_host param_watcher inputmethod_service \
+             distributeddata screenlock_server useriam powermgr audio_server \
+             bluetooth_service wifi_manager_service ui_service huks_service \
+             deviceauth_service softbus_server device_manager \
+             com.ohos.sceneboard; do
+        pkill -f "^$p" 2>/dev/null
+    done
+
+
 }
 
 # Стирать после любого изменения списка процессов или прав в token_init.cpp.
@@ -1061,6 +1178,13 @@ chmod 666 /dev/unix/socket/hilog* 2>/dev/null
 # чего хватает, чтобы снять момент загрузки уже после её окончания.
 "$BIN/hilog" -G 16M
 
+
+
+
+echo "приёмник событий"
+start_bg hiview python3 "$SCRIPT_DIR/hiview_wrapper.py"
+
+
 echo "samgr"
 start_bg samgr "$BIN/samgr"
 wait_samgr || { echo "  samgr не отвечает, см. $LOGDIR/samgr.log"; exit 1; }
@@ -1162,9 +1286,14 @@ sleep 1
 set_token foundation
 
 start_sa ui_service 7002
-# start_sa device_manager 4802
-start_sa_opt wifi_manager_service 1120
 
+start_sa_opt wifi_manager_service 1120
+start_sa_opt deviceauth_service 4701
+
+
+start_sa_opt deviceauth_service 4701
+start_sa_opt softbus_server 4700
+start_sa_opt device_manager 4802
 
 
 # Распорядитель пакетов обходит /system/app один раз, при своём запуске.
