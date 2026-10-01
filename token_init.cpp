@@ -53,6 +53,28 @@ const char *PERMS[] = {
     // секунду отказывает подписчику — та самая ровная жалоба в журнале.
     "ohos.permission.RUNNING_STATE_OBSERVER",
 
+
+    // Ближняя связь: сеть, радиомодуль, беспроводной обмен, удостоверение
+    // устройства. Полный заводской перечень вдвое длиннее, но остальное —
+    // про сверхширокополосную связь, учёт трафика и прочее, чего у нас нет.
+    "ohos.permission.INTERNET",
+    "ohos.permission.GET_NETWORK_INFO",
+    "ohos.permission.CONNECTIVITY_INTERNAL",
+    "ohos.permission.DISTRIBUTED_DATASYNC",
+    "ohos.permission.ACCESS_BLUETOOTH",
+    "ohos.permission.MANAGE_BLUETOOTH",
+    "ohos.permission.GET_BLUETOOTH_LOCAL_MAC",
+    "ohos.permission.GET_WIFI_INFO",
+    "ohos.permission.GET_WIFI_INFO_INTERNAL",
+    "ohos.permission.GET_WIFI_LOCAL_MAC",
+    "ohos.permission.ACCESS_IDS",
+    "ohos.permission.sec.ACCESS_UDID",
+    "ohos.permission.ACCESS_DEVAUTH_CRED_PRIVILEGE",
+    "ohos.permission.ACCESS_SERVICE_DP",
+    "ohos.permission.MANAGE_DISTRIBUTED_ACCOUNTS",
+    "ohos.permission.GET_DISTRIBUTED_ACCOUNTS",
+
+
 };
 
 // Имена процессов ровно те, под которыми они видны в /proc/<pid>/cmdline.
@@ -92,6 +114,9 @@ const char *PROCESSES[] = {
     "device_manager",
     "huks_service",
     "wifi_manager_service",
+"deviceauth_service",
+
+
 };
 
 constexpr const char *BYNAME_DIR = "/data/service/el0/access_token/byname";
