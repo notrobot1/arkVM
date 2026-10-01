@@ -14,11 +14,11 @@
 # оборачивалось пятисекундным ожиданием впустую. Этот присмотрщик слушает те
 # же свойства и делает то же, что сделал бы init.
 #
-# Запускается из start.sh сразу после диспетчера служб:
-#     "$SCRIPT_DIR/svc_ctl.sh" &
+# Запускается из start.sh сразу после диспетчера служб, в своём сеансе,
+# чтобы ни он, ни поднятые им службы не ушли вместе с окном терминала:
+#     setsid "$SCRIPT_DIR/svc_ctl.sh" </dev/null >>"$LOGDIR/svc_ctl.out" 2>&1 &
 
 set -u
-trap 'say "присмотрщик завершается (сигнал $?)"' EXIT
 
 BIN=${BIN:-/system/bin}
 LOGDIR=${LOGDIR:-/tmp/arkvm}
@@ -27,6 +27,18 @@ LOG="$LOGDIR/svc_ctl.log"
 PARAM=$BIN/param
 SA_MAIN=$BIN/sa_main
 SAMGR_CLIENT=$BIN/samgr_client
+# Службы, которые поднимает start.sh сам. Присмотрщик их не трогает: иначе
+# на просьбу диспетчера он поднимет второй такой же процесс, и два
+# одинаковых будут мешать друг другу — подписываться на одни события,
+# спорить за объявление способности.
+SKIP_NAMES=${SKIP_NAMES:-"foundation wifi_manager_service device_manager deviceauth_service softbus_server"}
+
+
+# Сколько раз подряд пробовать поднять службу, прежде чем оставить её в покое
+# до новой просьбы. Без этого предела служба, которая не может подняться в
+# принципе, поднимается вечно: свойство с просьбой не очищается, и каждая
+# неудача оборачивается новым падением и новым слепком памяти в /tmp.
+MAX_FAILS=${MAX_FAILS:-3}
 
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-/system/lib64:/system/lib64/platformsdk:/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk:/vendor/lib64:/vendor/lib64/passthrough}
 
@@ -44,9 +56,13 @@ TOKEN_WRAPPER='
 '
 
 mkdir -p "$LOGDIR"
-declare -A LAUNCHED       # имя процесса → номер, который мы запустили
+
+declare -A LAUNCHED   # имя процесса → номер, который мы запустили
+declare -A FAILS      # имя процесса → сколько раз подряд не поднялся
 
 say() { echo "$(date +%H:%M:%S) $*" >> "$LOG"; }
+
+trap 'say "присмотрщик завершается, код $?"' EXIT
 
 # param get при отсутствии свойства печатает не пустоту, а жалобу — отсеиваем.
 get_param() {
@@ -70,23 +86,11 @@ sa_ids() {
 # Жива ли служба. Сперва дешёвая проверка по нашему же номеру процесса,
 # затем — по перечню диспетчера. По имени процесса проверять нельзя: ядро
 # хранит его в пятнадцати знаках, а sa_main вдобавок переписывает доводы.
-
-#alive() {
-#    local name=$1 pid=${LAUNCHED[$name]:-} id list
-#    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-#        return 0
-#    fi
-#    list=$("$SAMGR_CLIENT" 2>/dev/null)
-#    for id in $(sa_ids "$name"); do
-#        printf '%s\n' "$list" | grep -qx "  $id" && return 0
-#    done
-#    return 1
-#}
-
 alive() {
     local name=$1
     local pid=${LAUNCHED[$name]:-}
     local id list
+
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         return 0
     fi
@@ -94,56 +98,35 @@ alive() {
     for id in $(sa_ids "$name"); do
         printf '%s\n' "$list" | grep -qx "  $id" && return 0
     done
-
-    say "alive($name): pid=${pid:-нет}, ids=$(sa_ids "$name" | tr '\n' ' ')"
     return 1
 }
 
-
-
-# Запуск тем же способом, что и в start.sh: от корня, с маркером доступа.
-# Службы способностей узнаём по описанию в /system/profile, всё прочее —
-# по исполняемому файлу в /system/bin.
+# Запуск тем же способом, что и в start.sh: от корня, с маркером доступа,
+# в своём сеансе. Службы способностей узнаём по описанию в /system/profile,
+# всё прочее — по исполняемому файлу в /system/bin.
+#
+# Доводы передаём дальше обязательно: для служб с пометкой «не поднимать при
+# создании» диспетчер сообщает в них номер нужной способности, и без него
+# sa_main не поднимет ничего.
 launch() {
     local name=$1; shift
     local profile="/system/profile/$name.json"
 
-    #if [ -f "$profile" ]; then
-    #    say "поднимаю службу $name"
-    #    ( cd / && exec /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "$profile" ) \
-    #        >> "$LOGDIR/$name.log" 2>&1 &
-    #    LAUNCHED[$name]=$!
-    #    return 0
-    #fi
-
-    #if [ -x "$BIN/$name" ]; then
-    #    say "поднимаю обычный процесс $name"
-    #    ( cd / && exec /bin/bash -c "$TOKEN_WRAPPER" _ "$name" "$BIN/$name" "$@" ) \
-    #        >> "$LOGDIR/$name.log" 2>&1 &
-    #    LAUNCHED[$name]=$!
-    #    return 0
-    #fi
-
-
     if [ -f "$profile" ]; then
-        say "поднимаю службу $name"
-        setsid /bin/bash -c "cd / && $TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "$profile" \
+        say "поднимаю службу $name${*:+ (доводы: $*)}"
+        setsid /bin/bash -c "cd / && $TOKEN_WRAPPER" _ "$name" "$SA_MAIN" "$profile" "$@" \
             >> "$LOGDIR/$name.log" 2>&1 &
         LAUNCHED[$name]=$!
         return 0
     fi
 
     if [ -x "$BIN/$name" ]; then
-        say "поднимаю обычный процесс $name"
+        say "поднимаю обычный процесс $name${*:+ (доводы: $*)}"
         setsid /bin/bash -c "cd / && $TOKEN_WRAPPER" _ "$name" "$BIN/$name" "$@" \
             >> "$LOGDIR/$name.log" 2>&1 &
         LAUNCHED[$name]=$!
         return 0
     fi
-
-
-
-
 
     say "не знаю, как поднять $name: нет ни описания, ни исполняемого файла"
     return 1
@@ -154,8 +137,18 @@ handle_start() {
     local name=${value%%|*}
     local rest=${value#*|}
     local args=()
+    local i
+
+
+
 
     [ -n "$name" ] || return
+
+    case " $SKIP_NAMES " in
+        *" $name "*) set_status "$name" 2; return ;;
+    esac
+
+
 
     if alive "$name"; then
         # Уже работает — просто подтверждаем отметку: диспетчер мог потерять
@@ -164,36 +157,42 @@ handle_start() {
         return
     fi
 
+    if [ "${FAILS[$name]:-0}" -ge "$MAX_FAILS" ]; then
+        return          # не поднимается — оставляем в покое до новой просьбы
+    fi
+
     if [ "$rest" != "$value" ]; then
         IFS='|' read -r -a args <<< "$rest"
     fi
 
     set_status "$name" 1
     if ! launch "$name" "${args[@]+"${args[@]}"}"; then
+        FAILS[$name]=$MAX_FAILS     # поднимать нечем, пробовать бессмысленно
         set_status "$name" 5
         return
     fi
 
     # Диспетчер отводит на запуск пять секунд — укладываемся быстрее.
-    local i
     for i in $(seq 1 40); do
         sleep 0.1
         if alive "$name"; then
             set_status "$name" 2
+            FAILS[$name]=0
             say "$name поднят"
             return
         fi
     done
 
-    say "$name не появился"
+    FAILS[$name]=$(( ${FAILS[$name]:-0} + 1 ))
+    say "$name не появился (неудача ${FAILS[$name]} из $MAX_FAILS)"
     set_status "$name" 5
 }
 
 handle_stop() {
-    #local name=$1 signal=$2 pid=${LAUNCHED[$name]:-}
     local name=$1
     local signal=$2
     local pid=${LAUNCHED[$name]:-}
+
     [ -n "$name" ] || return
     say "останавливаю $name сигналом $signal"
     if [ -n "$pid" ]; then
@@ -216,8 +215,9 @@ while true; do
     v=$(get_param ohos.ctl.start)
     if [ -n "$v" ]; then
         if [ "$v" != "$last_start" ]; then
-            # Новая просьба — исполняем сразу.
+            # Новая просьба — исполняем сразу и прощаем прежние неудачи.
             last_start=$v
+            FAILS[${v%%|*}]=0
             handle_start "$v"
             next_check=$((now + 2))
         elif [ "$now" -ge "$next_check" ]; then
