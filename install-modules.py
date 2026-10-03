@@ -105,6 +105,26 @@ def main():
                         os.remove(dst_path)
                     except OSError:
                         pass
+                # У приложений, собираемых сборщиком приложений (ohos_app),
+                # источником в описании значится каталог с готовым пакетом,
+                # а не сам пакет. Раскладываем содержимое целиком.
+                if os.path.isdir(src_path):
+                    os.makedirs(dst_path, exist_ok=True)
+                    for name in sorted(os.listdir(src_path)):
+                        item = os.path.join(src_path, name)
+                        if not os.path.isfile(item):
+                            continue
+                        target = os.path.join(dst_path, name)
+                        if os.path.islink(target) or os.path.isfile(target):
+                            try:
+                                os.remove(target)
+                            except OSError:
+                                pass
+                        shutil.copy2(item, target)
+                        os.chmod(target, 0o644)
+                    installed += 1
+                    continue
+
                 shutil.copy2(src_path, dst_path)
                 os.chmod(dst_path, 0o755 if is_executable(info, dest) else 0o644)
                 installed += 1
