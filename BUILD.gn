@@ -537,6 +537,15 @@ group("all") {
     
     "//foundation/filemanagement/app_file_service/interfaces/kits/ndk/fileuri/src:ohfileuri",
 
+    "//foundation/filemanagement/user_file_service/services/file_extension_hap:user_file_manager_hap",
+
+    "//foundation/filemanagement/user_file_service/services:user_file_managers",
+
+
+
+    "//foundation/filemanagement/user_file_service/frameworks/js/napi/file_access_module:fileaccess",
+    "//foundation/filemanagement/user_file_service/frameworks/js/napi/file_access_ext_ability:fileaccessextensionability_napi",
+
 ]
 }
 
