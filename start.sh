@@ -252,6 +252,12 @@ ensure_dirs() {
              /data/system/hiview/unzip_configs/sys_event_def
     chmod 0775 /data/log
 
+
+    # Кладовая службы доступа к пользовательским файлам.
+    mkdir -p /data/service/el1/public/database/ufs_db
+    chmod 2770 /data/service/el1/public/database/ufs_db
+
+
 }
 
 
@@ -875,6 +881,36 @@ EOF
     echo "библиотеки набора разработчика"
     copy_out "$LIB/ndk" libhilog_ndk.z.so libnative_rdb_ndk.z.so libohfileuri.so
 
+
+
+
+
+
+    echo "доступ к пользовательским файлам"
+    copy_out "$LIB" libfile_access_service.z.so
+    # Заводское описание велит поднимать службу по требованию — при удалении
+    # пакета и только если включён признак облачного диска, который по
+    # умолчанию выключен. То есть сама она не поднимется никогда. Поднимаем
+    # при создании процесса, как сделали для Wi-Fi.
+    python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+with open(f"{tree}/foundation/filemanagement/user_file_service/services/5010.json") as f:
+    d = json.load(f)
+for item in d["systemability"]:
+    item["run-on-create"] = True
+    item.pop("start-on-demand", None)
+json.dump(d, open("/system/profile/file_access_service.json", "w"), indent=4)
+EOF
+
+
+
+
+    copy_out "$LIB/module/file" libfileaccess.z.so libfileextensioninfo.z.so
+    copy_out "$LIB/module/application" libfileaccessextensionability_napi.z.so
+
+
+
     echo "готово"
 }
 
@@ -971,7 +1007,7 @@ stop_all() {
              distributeddata screenlock_server useriam powermgr audio_server \
              bluetooth_service wifi_manager_service ui_service huks_service \
              deviceauth_service softbus_server device_manager \
-             com.ohos.sceneboard; do
+             com.ohos.sceneboard file_access_service ; do
         pkill -f "^$p" 2>/dev/null
     done
 
@@ -1320,6 +1356,8 @@ start_sa_opt deviceauth_service 4701
 start_sa_opt deviceauth_service 4701
 start_sa_opt softbus_server 4700
 start_sa_opt device_manager 4802
+start_sa_opt file_access_service 5010
+
 
 
 # Распорядитель пакетов обходит /system/app один раз, при своём запуске.
