@@ -530,7 +530,12 @@ group("all") {
     "//foundation/communication/dsoftbus/core/frame:softbus_permission_json",
     "//foundation/communication/dsoftbus/core/frame:softbus_lnn_permission_json",
     "//foundation/communication/dsoftbus/core/frame:softbus_rpc_sa_permission_json",
-    "//base/hiviewdfx/hiview:hiview",
+    "//base/hiviewdfx/hiview:hiview_package",
+ "//base/hiviewdfx/hisysevent/frameworks/native:hisysevent",
+"//foundation/distributeddatamgr/relational_store/interfaces/ndk:native_rdb_ndk",
+    "//base/hiviewdfx/hilog/frameworks/hilog_ndk:hilog_ndk",
+    
+    "//foundation/filemanagement/app_file_service/interfaces/kits/ndk/fileuri/src:ohfileuri",
 
 ]
 }
