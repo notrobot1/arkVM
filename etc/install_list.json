@@ -1,4 +1,3 @@
-cat arkvm/etc/install_list.json
 {
     "install_list" : [
         {
