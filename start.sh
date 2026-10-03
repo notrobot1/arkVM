@@ -388,7 +388,7 @@ install_all() {
 
     echo "локальные цели arkvm"
     local t p
-    for t in sa_main samgr_client arkvm_param_service arkvm_token_init; do
+    for t in sa_main samgr_client arkvm_param_service arkvm_token_init hiview hisysevent; do
         p=$(find "$OUT" -name "$t" -type f -perm -111 \
                  -not -path "*/obj/*" -not -path "*unstripped*" \
                  -not -path "*/clang_x64/*" | head -1)
@@ -848,6 +848,32 @@ EOF
         "$TREE"/foundation/communication/dsoftbus/core/common/security/permission/softbus_*.json \
         /system/etc/communication/softbus/
 
+
+
+
+
+    echo "приёмник системных событий"
+    # Перечень надстроек собирается на этапе сборки под тот набор, что
+    # включён в изделие, — поэтому берём его из дерева сборки, а не из
+    # исходников: в исходниках его попросту нет.
+    mkdir -p /system/etc/hiview
+    install -m 644 "$OUT/gen/base/hiviewdfx/hiview/plugin_config" /system/etc/hiview/
+    # Сами надстройки — обычные библиотеки, служба открывает их по именам
+    # из перечня и ищет в /system/lib64.
+    install -m 644 "$OUT"/hiviewdfx/hiview/*.z.so "$LIB"/ 2>/dev/null && echo "  надстройки hiview"
+
+
+
+
+    
+        echo "диспетчер файлов"
+    install_hap /system/app/FileManager \
+        "$TREE/applications/standard/filepicker/oh_filemanger_6.1/filemanager/products/phone/build/phone/outputs/default/phone-default-signed.hap" \
+        FileManager.hap
+
+
+    echo "библиотеки набора разработчика"
+    copy_out "$LIB/ndk" libhilog_ndk.z.so libnative_rdb_ndk.z.so libohfileuri.so
 
     echo "готово"
 }
