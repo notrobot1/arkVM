@@ -73,7 +73,11 @@ const char *PERMS[] = {
     "ohos.permission.ACCESS_SERVICE_DP",
     "ohos.permission.MANAGE_DISTRIBUTED_ACCOUNTS",
     "ohos.permission.GET_DISTRIBUTED_ACCOUNTS",
-
+    // Служба доступа к пользовательским файлам (5010): она посредничает
+    // между приложениями и поставщиками каталогов.
+    "ohos.permission.FILE_ACCESS_MANAGER",
+    "ohos.permission.CONNECT_FILE_ACCESS_EXTENSION",
+    "ohos.permission.CHECK_SANDBOX_POLICY",
 
 };
 
@@ -115,7 +119,7 @@ const char *PROCESSES[] = {
     "huks_service",
     "wifi_manager_service",
 "deviceauth_service",
-
+"file_access_service",
 
 };
 
