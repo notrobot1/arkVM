@@ -3,12 +3,10 @@
         {
             "app_dir" : "/system/app/SceneBoard",
             "removable" : false
-        },
-        {
+        },{
             "app_dir" : "/system/app/ohos.global.systemres",
             "removable" : false
-        },
-        {
+        },{
             "app_dir" : "/system/app/SettingsData",
             "removable" : false
         },{
@@ -20,7 +18,11 @@
         },{
             "app_dir": "/system/app/FileManager",
             "removable": false
+        },{
+            "app_dir": "/system/app/com.ohos.UserFile.ExternalFileManager",
+            "removable": false
         }
+
 
     ]
 }
