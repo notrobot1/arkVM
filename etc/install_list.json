@@ -1,3 +1,4 @@
+cat arkvm/etc/install_list.json
 {
     "install_list" : [
         {
@@ -7,6 +8,20 @@
         {
             "app_dir" : "/system/app/ohos.global.systemres",
             "removable" : false
+        },
+        {
+            "app_dir" : "/system/app/SettingsData",
+            "removable" : false
+        },{
+            "app_dir": "/system/app/Settings",
+            "removable": false
+	    },{
+            "app_dir": "/system/app/FileManagerSample",
+            "removable": false
+        },{
+            "app_dir": "/system/app/FileManager",
+            "removable": false
         }
+
     ]
 }
