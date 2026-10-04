@@ -1,0 +1,25 @@
+[binaries]
+c = ['/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/llvm/bin/clang', '--target=x86_64-linux-ohos', '--sysroot=/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/sysroot']
+cpp = ['/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/llvm/bin/clang++', '--target=x86_64-linux-ohos', '--sysroot=/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/sysroot']
+ar = '/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/llvm/bin/llvm-ar'
+strip = '/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/llvm/bin/llvm-strip'
+ranlib = '/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/llvm/bin/llvm-ranlib'
+pkg-config = 'pkg-config'
+
+[properties]
+sys_root = '/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/sysroot'
+pkg_config_libdir = '/mnt/ohos/wpe/out/lib/pkgconfig'
+needs_exe_wrapper = true
+
+[built-in options]
+prefix = '/mnt/ohos/wpe/out'
+c_args = ['-O2', '-fPIC', '-I/mnt/ohos/wpe/out/include']
+cpp_args = ['-O2', '-fPIC', '-I/mnt/ohos/wpe/out/include']
+c_link_args = ['-L/mnt/ohos/wpe/out/lib', '-Wl,-rpath-link,/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/sysroot/usr/lib/x86_64-linux-ohos']
+cpp_link_args = ['-L/mnt/ohos/wpe/out/lib', '-Wl,-rpath-link,/mnt/ohos/OpenHarmony-6.1-Release/prebuilts/ohos-sdk/linux/26.0.0/native/sysroot/usr/lib/x86_64-linux-ohos']
+
+[host_machine]
+system = 'linux'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
