@@ -1,0 +1,17 @@
+sysPattern /devices/platform/fe2b0000.dwmmc/* label disk flag 0
+sysPattern /devices/platform/usbhost/fd000000.dwc3/* label disk flag 0
+sysPattern /devices/platform/fd800000.usb/* label disk flag 0
+sysPattern /devices/platform/soc/f9890000.ehci/* label disk flag 0
+sysPattern /devices/platform/hi_mci.1/mmc_host/mmc1/* label disk flag 0
+sysPattern /devices/platform/soc/soc:ap-ahb/22210000.sdio/mmc_host/mmc1/* label disk flag 0
+sysPattern /devices/platform/hisi_usb/f8600000.dwc3/* label disk flag 0
+sysPattern /devices/platform/hisi_usb/efc00000.dwc3/* label disk flag 0
+sysPattern /devices/platform/hiusb/hiusb_port/* label disk flag 0
+sysPattern /devices/platform/bfa00000.sata/* label disk flag 0
+sysPattern /devices/platform/hisi_usb/f8400000.dwc3/* label disk flag 0
+sysPattern /devices/platform/soc/25100000.usb3/25100000.dwc3/* label disk flag 0
+sysPattern /devices/platform/e8000000.hi_pcie/* label disk flag 0
+sysPattern /devices/platform/b8000000.hi_pcie/* label disk flag 0
+sysPattern /devices/platform/a0000000.hi_pcie/*/nvme/nvme1/* label disk flag 0
+sysPattern /devices/pci0000:00/*/usb*/* label disk flag 0
+sysPattern /devices/pci0000:00/*/mmc_host/* label disk flag 0
