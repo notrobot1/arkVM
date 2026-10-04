@@ -546,6 +546,10 @@ group("all") {
     "//foundation/filemanagement/user_file_service/frameworks/js/napi/file_access_module:fileaccess",
     "//foundation/filemanagement/user_file_service/frameworks/js/napi/file_access_ext_ability:fileaccessextensionability_napi",
 
+
+    "//foundation/filemanagement/file_api/interfaces/kits/c/fileio:ohfileio",
+    "//foundation/filemanagement/disk_manager:disk_manager_all",
+
 ]
 }
 
