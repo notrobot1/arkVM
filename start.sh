@@ -879,7 +879,7 @@ EOF
 
 
     echo "библиотеки набора разработчика"
-    copy_out "$LIB/ndk" libhilog_ndk.z.so libnative_rdb_ndk.z.so libohfileuri.so
+    copy_out "$LIB/ndk" libhilog_ndk.z.so libnative_rdb_ndk.z.so libohfileuri.so libohfileio.so
 
 
 
@@ -909,7 +909,41 @@ EOF
     copy_out "$LIB/module/file" libfileaccess.z.so libfileextensioninfo.z.so
     copy_out "$LIB/module/application" libfileaccessextensionability_napi.z.so
 
+    # Наш перечень разрешённых устройств хранения — поверх заводского.
+    #install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/storage_daemon/disk_config
 
+
+
+
+
+
+    echo "распорядитель дисков"
+    copy_out "$LIB" libdisk_manager_server.z.so
+    # Заводское описание велит поднимать по требованию, но просьбу подаёт
+    # диспетчер способностей, а у нас это делает присмотрщик — надёжнее
+    # поднять сразу.
+    python3 - "$TREE" <<'EOF'
+import json, sys
+tree = sys.argv[1]
+with open(f"{tree}/foundation/filemanagement/disk_manager/sa_profile/8640.json") as f:
+    d = json.load(f)
+for item in d["systemability"]:
+    item["run-on-create"] = True
+json.dump(d, open("/system/profile/disk_manager.json", "w"), indent=4)
+EOF
+    # Перечень разрешённых устройств хранения. Разборщик настройки обрывает
+    # чтение на первой пустой строке и не понимает пояснений, поэтому файл
+    # состоит только из строк sysPattern, без пропусков.
+    install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/storage_daemon/disk_config
+
+
+    # Перечень разрешённых устройств хранения. Две службы читают его из
+    # разных мест, но одного вида. Разборщик обрывает чтение на первой
+    # пустой строке и не понимает пояснений, поэтому в файле только строки
+    # sysPattern, без пропусков и примечаний.
+    mkdir -p /system/etc/storage_daemon /system/etc/disk_manager
+    install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/storage_daemon/disk_config
+    install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/disk_manager/disk_config
 
     echo "готово"
 }
@@ -1357,7 +1391,7 @@ start_sa_opt deviceauth_service 4701
 start_sa_opt softbus_server 4700
 start_sa_opt device_manager 4802
 start_sa_opt file_access_service 5010
-
+start_sa_opt disk_manager 8640
 
 
 # Распорядитель пакетов обходит /system/app один раз, при своём запуске.
