@@ -1,0 +1,58 @@
+#!/bin/sh
+# Запуск контейнера сборки. Выполняется на хозяйской машине.
+#
+#   ./wpe.sh            — собрать образ (если нужно) и войти в оболочку
+#   ./wpe.sh build      — собрать образ и сразу запустить сборку зависимостей
+#   ./wpe.sh deps       — только сборка зависимостей (образ уже есть)
+#   ./wpe.sh engine     — сборка самого WPE WebKit
+#   ./wpe.sh image      — только пересобрать образ
+#
+# Каталог /mnt/ohos подключается внутрь по тому же пути, поэтому все записи
+# в наших заметках и в файлах настройки перекрёстной сборки совпадают с тем,
+# что видно изнутри.
+
+set -e
+
+WPE_DIR=/mnt/ohos/wpe
+IMAGE=wpe-build
+
+build_image() {
+    docker build -t "$IMAGE" "$WPE_DIR"
+}
+
+# --user — чтобы созданные файлы принадлежали вам, а не root.
+# HOME=/tmp — внутри контейнера вашего домашнего каталога нет, а meson и pip
+# норовят туда что-нибудь записать.
+run() {
+    docker run --rm -it \
+        -v /mnt/ohos:/mnt/ohos \
+        --user "$(id -u):$(id -g)" \
+        -e HOME=/tmp \
+        -w "$WPE_DIR" \
+        "$IMAGE" "$@"
+}
+
+# Перед сборкой зависимостей нужна одна вещь, которую контейнер достать не может:
+# библиотека-переходник ICU с уже работающей системы. Подробности — в README.
+check_icu() {
+    if [ ! -f "$WPE_DIR/prebuilt/libicu.so" ]; then
+        if [ -f /system/lib64/libicu.so ]; then
+            echo "Копирую libicu.so с установленной системы..."
+            mkdir -p "$WPE_DIR/prebuilt"
+            cp /system/lib64/libicu.so "$WPE_DIR/prebuilt/libicu.so"
+        else
+            echo "ОШИБКА: нет $WPE_DIR/prebuilt/libicu.so и нет /system/lib64/libicu.so"
+            echo "Положите туда libicu.so с устройства — см. README, раздел про ICU."
+            exit 1
+        fi
+    fi
+}
+
+case "${1:-shell}" in
+    image)  build_image ;;
+    shell)  build_image; run bash ;;
+    deps)   check_icu; run bash "$WPE_DIR/build-deps.sh" ;;
+    build)  build_image; check_icu; run bash "$WPE_DIR/build-deps.sh" ;;
+    engine) run bash "$WPE_DIR/build-engine.sh" ;;
+    *)      echo "неизвестная команда: $1"; exit 1 ;;
+esac
