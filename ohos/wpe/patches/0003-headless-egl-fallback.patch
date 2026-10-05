@@ -1,0 +1,52 @@
+Безэкранная площадка: запасной путь получения подключения к EGL
+
+Площадка умеет только два способа: через gbm и через «безэкранный»
+(EGL_MESA_platform_surfaceless). Если ни один не годится — сдаётся.
+
+В OpenHarmony libEGL — переходник поверх Mesa. Обычное подключение
+(eglGetDisplay с EGL_DEFAULT_DISPLAY) работает и даёт полноценный EGL 1.5
+со всеми нужными расширениями, а вот «безэкранный» способ переходник
+обрабатывает неверно: возвращает подключение, которое потом не запускается.
+
+Поэтому: проверяем полученное подключение сразу, а если не вышло — берём
+обычное. Для площадки это безразлично, она всё равно рисует в память.
+
+--- a/Source/WebKit/WPEPlatform/wpe/headless/WPEDisplayHeadless.cpp
++++ b/Source/WebKit/WPEPlatform/wpe/headless/WPEDisplayHeadless.cpp
+@@ -144,18 +144,24 @@
+ #endif
+
+-    if (!epoxy_has_egl_extension(nullptr, "EGL_MESA_platform_surfaceless")) {
+-        g_set_error_literal(error, WPE_EGL_ERROR, WPE_EGL_ERROR_NOT_AVAILABLE, "Can't get EGL display: Surfaceless platform not supported");
+-        return nullptr;
+-    }
+-
+-    EGLDisplay eglDisplay = EGL_NO_DISPLAY;
+-    if (epoxy_has_egl_extension(nullptr, "EGL_EXT_platform_base"))
+-        eglDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+-    else if (epoxy_has_egl_extension(nullptr, "EGL_KHR_platform_base"))
+-        eglDisplay = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+-    if (eglDisplay != EGL_NO_DISPLAY)
+-        return eglDisplay;
++    EGLDisplay eglDisplay = EGL_NO_DISPLAY;
++    if (epoxy_has_egl_extension(nullptr, "EGL_MESA_platform_surfaceless")) {
++        if (epoxy_has_egl_extension(nullptr, "EGL_EXT_platform_base"))
++            eglDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
++        else if (epoxy_has_egl_extension(nullptr, "EGL_KHR_platform_base"))
++            eglDisplay = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
++        /* Переходник EGL в OpenHarmony возвращает подключение, которое затем
++           не запускается. Проверяем сразу, чтобы не отдать негодное. */
++        if (eglDisplay != EGL_NO_DISPLAY && eglInitialize(eglDisplay, nullptr, nullptr))
++            return eglDisplay;
++        eglDisplay = EGL_NO_DISPLAY;
++    }
++
++    /* Запасной путь: безэкранного способа подключения может не быть
++       (так в OpenHarmony), но обычное подключение работает. */
++    eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    if (eglDisplay != EGL_NO_DISPLAY && eglInitialize(eglDisplay, nullptr, nullptr))
++        return eglDisplay;
+
+     g_set_error_literal(error, WPE_EGL_ERROR, WPE_EGL_ERROR_NOT_AVAILABLE, "Can't get EGL display: failed to create surfaceless EGL display");
+     return nullptr;
+ }
