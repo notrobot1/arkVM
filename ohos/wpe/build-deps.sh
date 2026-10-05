@@ -340,6 +340,15 @@ meson_build glib "glib-$V_GLIB" \
     -Dtests=false -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled \
     -Dxattr=false -Dglib_assert=false -Dglib_checks=false
 
+# В описании glib записаны пути к её утилитам (glib-mkenums, glib-genmarshal
+# и прочим), и указывают они в наш склад. Но там лежат сборки под OpenHarmony,
+# а запускаться эти утилиты должны здесь, на машине сборки. Перенаправляем их
+# на системные — иначе harfbuzz и libsoup спотыкаются ещё при настройке.
+sed -i 's|${bindir}/|/usr/bin/|g' \
+    "$PREFIX/lib/pkgconfig/glib-2.0.pc" \
+    "$PREFIX/lib/pkgconfig/gio-2.0.pc" \
+    "$PREFIX/lib/pkgconfig/gobject-2.0.pc"
+
 # ==============================================================================
 #  Шаг 4. Разбор клавиатуры и опрос возможностей видеоподсистемы
 # ==============================================================================
