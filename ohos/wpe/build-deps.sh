@@ -174,15 +174,20 @@ cp -n "$NDK/llvm/lib/clang/15.0.4/lib/$TARGET/libclang_rt.builtins.a" \
 
 # --- Общие наборы доводов -----------------------------------------------------
 OH="--target=$TARGET --sysroot=$SYSROOT -resource-dir=$RTDIR -B$BDIR"
-OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$NDK/llvm/lib/$TARGET -L$PREFIX/lib"
+# Каталога $NDK/llvm/lib/$TARGET здесь намеренно НЕТ: там лежит libc++_shared.so
+# от OpenHarmony (пятнадцатой версии), и сборщик связей хватал бы её вместо нашей.
+OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$PREFIX/lib"
 # U_DISABLE_RENAMING: ICU в OpenHarmony собран без приписывания номера версии
 # к именам вызовов, и заголовки надо об этом предупредить.
 CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$PREFIX/include"
-# -stdlib=libc++ стоит ТОЛЬКО среди доводов связывания: при сборке он не нужен,
-# а Meson проверяет пробники с -Werror=unused-command-line-argument, и лишний
-# довод превращается в ошибку.
+# -nostdinc++ / -nostdlib++ отрезают стандартную библиотеку C++ от OpenHarmony
+# целиком: и её заголовки, и её саму. Довод -stdlib=libc++ использовать нельзя —
+# для цели OpenHarmony он подставляет libc++_shared.so пятнадцатой версии, и
+# наша восемнадцатая до строки связывания уже не доходит. Поэтому называем
+# нужные библиотеки прямо.
 CXXSTD="-nostdinc++ -isystem $CXX18/include/c++/v1"
-CXXLINK="-stdlib=libc++ -L$CXX18/lib -Wl,-rpath-link,$CXX18/lib"
+CXXLINK="-nostdlib++ -L$CXX18/lib -Wl,-rpath-link,$CXX18/lib"
+CXXLIBS="-lc++ -lc++abi -lunwind"
 
 # --- Описание перекрёстной сборки для CMake -----------------------------------
 # Два: одно без стандартной библиотеки C++ (ею мы и собираем саму libc++),
@@ -221,7 +226,7 @@ set(CMAKE_PREFIX_PATH $PREFIX)
 # Стандартная библиотека C++ дописывается в самый хвост каждой строки
 # связывания. Так надёжнее, чем через доводы связывания: WebKit их перетирает
 # своими, и libc++ из строки пропадала.
-set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib -lc++ -lc++abi -lunwind" CACHE STRING "")
+set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib $CXXLIBS" CACHE STRING "")
 EOF
 
 # --- Описание перекрёстной сборки для Meson -----------------------------------
@@ -245,11 +250,12 @@ prefix = '$PREFIX'
 c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include']
 cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include',
             '-nostdinc++', '-isystem', '$CXX18/include/c++/v1']
-c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib',
+c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$PREFIX/lib',
                '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET']
-cpp_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-stdlib=libc++',
-                 '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib', '-L$CXX18/lib',
-                 '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET', '-Wl,-rpath-link,$CXX18/lib']
+cpp_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-nostdlib++',
+                 '-L$PREFIX/lib', '-L$CXX18/lib',
+                 '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET', '-Wl,-rpath-link,$CXX18/lib',
+                 '-lc++', '-lc++abi', '-lunwind']
 
 [host_machine]
 system = 'linux'
@@ -266,7 +272,7 @@ export RANLIB=llvm-ranlib-18
 export STRIP=llvm-strip-18
 export CFLAGS="$CFLAGS_COMMON"
 export CXXFLAGS="$CFLAGS_COMMON"
-export LDFLAGS="$OHLINK $CXXLINK -Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET"
+export LDFLAGS="$OHLINK $CXXLINK $CXXLIBS -Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET"
 export PKG_CONFIG_SYSROOT_DIR=/
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
