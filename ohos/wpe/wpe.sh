@@ -32,27 +32,11 @@ run() {
         "$IMAGE" "$@"
 }
 
-# Перед сборкой зависимостей нужна одна вещь, которую контейнер достать не может:
-# библиотека-переходник ICU с уже работающей системы. Подробности — в README.
-check_icu() {
-    if [ ! -f "$WPE_DIR/prebuilt/libicu.so" ]; then
-        if [ -f /system/lib64/libicu.so ]; then
-            echo "Копирую libicu.so с установленной системы..."
-            mkdir -p "$WPE_DIR/prebuilt"
-            cp /system/lib64/libicu.so "$WPE_DIR/prebuilt/libicu.so"
-        else
-            echo "ОШИБКА: нет $WPE_DIR/prebuilt/libicu.so и нет /system/lib64/libicu.so"
-            echo "Положите туда libicu.so с устройства — см. README, раздел про ICU."
-            exit 1
-        fi
-    fi
-}
-
 case "${1:-shell}" in
     image)  build_image ;;
     shell)  build_image; run bash ;;
-    deps)   check_icu; run bash "$WPE_DIR/build-deps.sh" ;;
-    build)  build_image; check_icu; run bash "$WPE_DIR/build-deps.sh" ;;
+    deps)   run bash "$WPE_DIR/build-deps.sh" ;;
+    build)  build_image; run bash "$WPE_DIR/build-deps.sh" ;;
     engine) run bash "$WPE_DIR/build-engine.sh" ;;
     *)      echo "неизвестная команда: $1"; exit 1 ;;
 esac
