@@ -52,6 +52,7 @@ V_EXPAT=2.6.2
 V_FREETYPE=2.13.2
 V_FONTCONFIG=2.15.0
 V_HARFBUZZ=8.5.0
+V_ICU=74.2
 
 JOBS=$(nproc)
 
@@ -176,7 +177,7 @@ OH="--target=$TARGET --sysroot=$SYSROOT -resource-dir=$RTDIR -B$BDIR"
 OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$NDK/llvm/lib/$TARGET -L$PREFIX/lib"
 # U_DISABLE_RENAMING: ICU в OpenHarmony собран без приписывания номера версии
 # к именам вызовов, и заголовки надо об этом предупредить.
-CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$PREFIX/include -DU_DISABLE_RENAMING=1"
+CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$PREFIX/include"
 # -stdlib=libc++ стоит ТОЛЬКО среди доводов связывания: при сборке он не нужен,
 # а Meson проверяет пробники с -Werror=unused-command-line-argument, и лишний
 # довод превращается в ошибку.
@@ -217,6 +218,10 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT    "$OHLINK $CXXLINK")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
 set(CMAKE_PREFIX_PATH $PREFIX)
+# Стандартная библиотека C++ дописывается в самый хвост каждой строки
+# связывания. Так надёжнее, чем через доводы связывания: WebKit их перетирает
+# своими, и libc++ из строки пропадала.
+set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib -lc++ -lc++abi -lunwind" CACHE STRING "")
 EOF
 
 # --- Описание перекрёстной сборки для Meson -----------------------------------
@@ -237,8 +242,8 @@ needs_exe_wrapper = true
 
 [built-in options]
 prefix = '$PREFIX'
-c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include', '-DU_DISABLE_RENAMING=1']
-cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include', '-DU_DISABLE_RENAMING=1',
+c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include']
+cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include',
             '-nostdinc++', '-isystem', '$CXX18/include/c++/v1']
 c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib',
                '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET']
@@ -361,39 +366,46 @@ autotools webp "libwebp-$V_WEBP" --disable-shared --enable-static \
     --disable-gl --disable-sdl --disable-png --disable-jpeg --disable-tiff --disable-gif
 
 # ==============================================================================
-#  Шаг 6. ICU — не собираем, а переиспользуем системный
+#  Шаг 6. ICU
 # ==============================================================================
-# На устройстве /system/lib64/libicu.so — тонкий переходник, выставляющий
-# наружу 1110 вызовов настоящих libhmicuuc и libhmicui18n. Собирать свой ICU
-# значило бы положить рядом ещё 30 МБ того же самого.
-# Заголовки берём из дерева (версия 74.2 — ровно та, что на устройстве),
-# а не из пакета для разработчиков: там они отстали до 72.1 и урезаны.
+# Сначала я хотел переиспользовать системный: на устройстве /system/lib64/libicu.so
+# — тонкий переходник к настоящим libhmicuuc и libhmicui18n. Но он выставляет
+# наружу лишь часть ICU: не хватает языковых соглашений (промежутки дат,
+# относительное время, разбор отформатированных значений), приведения регистра
+# с учётом языка и поиска по тексту. WebKit всё это использует.
+#
+# Поэтому собираем свой, версии 74.2 — ровно той, что в дереве OpenHarmony.
+# ICU особенная: её собственные средства сборки сперва надо получить для машины
+# сборки, и только потом строить саму библиотеку под цель. Отсюда два захода.
+
+if ! done_already icu-host; then
+    say "ICU $V_ICU — средства для машины сборки"
+    fetch icu "icu4c-${V_ICU//./_}-src.tgz" \
+        "https://github.com/unicode-org/icu/releases/download/release-${V_ICU//./-}/icu4c-${V_ICU//./_}-src.tgz"
+    rm -rf "$BLD/icu-host"; mkdir -p "$BLD/icu-host" "$LOGS"; : > "$LOGS/icu-host.log"
+    cd "$BLD/icu-host"
+    # Заход для машины сборки: обычный компилятор, без наших доводов.
+    ( unset CC CXX AR RANLIB STRIP CFLAGS CXXFLAGS LDFLAGS \
+            PKG_CONFIG_LIBDIR PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR
+      run_logged icu-host "$SRC/icu/source/configure" \
+          --disable-shared --enable-static --disable-tests --disable-samples \
+          --disable-extras --disable-layoutex
+      run_logged icu-host make -j"$JOBS" )
+    mark_done icu-host
+fi
 
 if ! done_already icu; then
-    say "ICU (переходник системы + заголовки из дерева)"
-    [ -f "$WPE/prebuilt/libicu.so" ] || die "нет $WPE/prebuilt/libicu.so — см. README"
-    I=$TREE/third_party/icu/icu4c/source
-    [ -d "$I/common/unicode" ] || die "нет заголовков ICU в дереве: $I"
-    mkdir -p "$PREFIX/include/unicode" "$PREFIX/lib"
-    cp "$I/common/unicode/"*.h "$I/i18n/unicode/"*.h "$PREFIX/include/unicode/"
-    cp "$WPE/prebuilt/libicu.so" "$PREFIX/lib/"
-    # CMake ищет ICU по трём привычным именам — у нас всё в одной библиотеке.
-    ln -sf libicu.so "$PREFIX/lib/libicuuc.so"
-    ln -sf libicu.so "$PREFIX/lib/libicui18n.so"
-    ln -sf libicu.so "$PREFIX/lib/libicudata.so"
-    for comp in uc i18n; do
-        cat > "$PREFIX/lib/pkgconfig/icu-$comp.pc" <<EOF
-prefix=$PREFIX
-libdir=\${prefix}/lib
-includedir=\${prefix}/include
-
-Name: icu-$comp
-Description: ICU $comp (переходник OpenHarmony)
-Version: 74.2
-Cflags: -I\${includedir} -DU_DISABLE_RENAMING=1
-Libs: -L\${libdir} -licu
-EOF
-    done
+    say "ICU $V_ICU — под OpenHarmony"
+    rm -rf "$BLD/icu"; mkdir -p "$BLD/icu"; : > "$LOGS/icu.log"
+    cd "$BLD/icu"
+    run_logged icu "$SRC/icu/source/configure" \
+        --host=x86_64-unknown-linux-musl --prefix="$PREFIX" \
+        --with-cross-build="$BLD/icu-host" \
+        --enable-shared --disable-static \
+        --disable-tests --disable-samples --disable-extras --disable-layoutex \
+        --disable-tools
+    run_logged icu make -j"$JOBS"
+    run_logged icu make install
     mark_done icu
 fi
 
