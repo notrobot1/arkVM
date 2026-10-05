@@ -223,10 +223,16 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT    "$OHLINK $CXXLINK")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
 set(CMAKE_PREFIX_PATH $PREFIX)
-# Стандартная библиотека C++ дописывается в самый хвост каждой строки
-# связывания. Так надёжнее, чем через доводы связывания: WebKit их перетирает
-# своими, и libc++ из строки пропадала.
-set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib $CXXLIBS" CACHE STRING "")
+# Сюда попадает всё, что должно стоять в самом хвосте каждой строки
+# связывания. Через обычные доводы связывания это не задать: WebKit их
+# перетирает своими.
+#
+#   libc++, libc++abi, libunwind — наша стандартная библиотека C++;
+#   libsharpyuv — часть libwebp, вынесенная в отдельную библиотеку начиная
+#     с версии 1.3, но не упомянутая в описании libwebp;
+#   libintl — заглушка вместо перевода сообщений, которую glib собирает сама
+#     при -Dnls=disabled; на неё опирается WebKitWebContext.
+set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib $CXXLIBS -L$PREFIX/lib -lsharpyuv -lintl" CACHE STRING "")
 EOF
 
 # --- Описание перекрёстной сборки для Meson -----------------------------------
