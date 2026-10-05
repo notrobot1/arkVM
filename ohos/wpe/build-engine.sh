@@ -121,12 +121,18 @@ fi
 # ==============================================================================
 # Около восьми тысяч единиц перевода. На обычной машине — час-полтора.
 
+# При первом заходе WebKit иногда спотыкается о собственную гонку: заголовок
+# ещё копируется, а предварительно скомпилированный блок уже начали собирать.
+# Поэтому один повтор делаем сами.
 say "сборка (журнал: $WPE/build-engine.log)"
-ninja -C "$BLD/wpe" 2>&1 | tee "$WPE/build-engine.log" | \
-    grep -E --line-buffered "^\[[0-9]+/|FAILED" || true
-
-grep -q "FAILED" "$WPE/build-engine.log" && \
-    die "сборка не прошла; посмотрите: grep -n 'error:' -A6 $WPE/build-engine.log | head -60"
+for attempt in 1 2; do
+    ninja -C "$BLD/wpe" 2>&1 | tee "$WPE/build-engine.log" | \
+        grep -E --line-buffered "^\[[0-9]+/|FAILED" || true
+    grep -q "FAILED" "$WPE/build-engine.log" || break
+    [ "$attempt" = 2 ] && \
+        die "сборка не прошла; посмотрите: grep -n 'error:' -A6 $WPE/build-engine.log | head -60"
+    say "повтор после сбоя"
+done
 
 say "установка"
 DESTDIR="$STAGE/wpe" ninja -C "$BLD/wpe" install >/dev/null
