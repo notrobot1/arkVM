@@ -76,16 +76,31 @@ fetch() {
     [ -d "$SRC/$dir" ] || die "после распаковки нет каталога $SRC/$dir"
 }
 
+# Выполнить шаг, записывая весь вывод в журнал. При неудаче показать хвост
+# журнала и остановиться — иначе ошибка потерялась бы в тишине.
+LOGS=$WPE/logs
+run_logged() {
+    local name="$1"; shift
+    if ! "$@" >>"$LOGS/$name.log" 2>&1; then
+        warn "не удалось: $name   (журнал: $LOGS/$name.log)"
+        echo
+        tail -40 "$LOGS/$name.log"
+        die "шаг «$name» не прошёл"
+    fi
+}
+
 # Сборка через обычный configure.
 # autotools <метка> <каталог-исходников> [доводы configure...]
 autotools() {
     local name="$1" srcdir="$2"; shift 2
     done_already "$name" && { warn "$name уже собран"; return 0; }
     say "$name"
-    rm -rf "$BLD/$name"; mkdir -p "$BLD/$name"; cd "$BLD/$name"
-    "$SRC/$srcdir/configure" --host=x86_64-unknown-linux-musl --prefix="$PREFIX" "$@" >/dev/null
-    make -j"$JOBS" >/dev/null
-    make install >/dev/null
+    rm -rf "$BLD/$name"; mkdir -p "$BLD/$name" "$LOGS"; : > "$LOGS/$name.log"
+    cd "$BLD/$name"
+    run_logged "$name" "$SRC/$srcdir/configure" \
+        --host=x86_64-unknown-linux-musl --prefix="$PREFIX" "$@"
+    run_logged "$name" make -j"$JOBS"
+    run_logged "$name" make install
     mark_done "$name"
 }
 
@@ -94,10 +109,10 @@ meson_build() {
     local name="$1" srcdir="$2"; shift 2
     done_already "$name" && { warn "$name уже собран"; return 0; }
     say "$name"
-    rm -rf "$BLD/$name"
-    meson setup "$BLD/$name" "$SRC/$srcdir" --cross-file "$WPE/ohos.cross" \
-        --buildtype release "$@" >/dev/null
-    ninja -C "$BLD/$name" install >/dev/null
+    rm -rf "$BLD/$name"; mkdir -p "$LOGS"; : > "$LOGS/$name.log"
+    run_logged "$name" meson setup "$BLD/$name" "$SRC/$srcdir" \
+        --cross-file "$WPE/ohos.cross" --buildtype release "$@"
+    run_logged "$name" ninja -C "$BLD/$name" install
     mark_done "$name"
 }
 
@@ -106,15 +121,15 @@ cmake_build() {
     local name="$1" srcdir="$2"; shift 2
     done_already "$name" && { warn "$name уже собран"; return 0; }
     say "$name"
-    rm -rf "$BLD/$name"
-    cmake -S "$SRC/$srcdir" -B "$BLD/$name" -G Ninja \
+    rm -rf "$BLD/$name"; mkdir -p "$LOGS"; : > "$LOGS/$name.log"
+    run_logged "$name" cmake -S "$SRC/$srcdir" -B "$BLD/$name" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$WPE/ohos.toolchain.cmake" \
-        -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_BUILD_TYPE=Release "$@" >/dev/null
-    ninja -C "$BLD/$name" install >/dev/null
+        -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_BUILD_TYPE=Release "$@"
+    run_logged "$name" ninja -C "$BLD/$name" install
     mark_done "$name"
 }
 
-mkdir -p "$SRC" "$BLD" "$PREFIX" "$STAGE" "$STAMPS"
+mkdir -p "$SRC" "$BLD" "$PREFIX" "$STAGE" "$STAMPS" "$LOGS"
 [ -d "$NDK" ] || die "нет пакета для разработчиков: $NDK"
 
 # ==============================================================================
@@ -162,8 +177,11 @@ OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$NDK/llvm/lib/$TARGET -L$PREFIX/lib"
 # U_DISABLE_RENAMING: ICU в OpenHarmony собран без приписывания номера версии
 # к именам вызовов, и заголовки надо об этом предупредить.
 CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$PREFIX/include -DU_DISABLE_RENAMING=1"
-CXXSTD="-nostdinc++ -isystem $CXX18/include/c++/v1 -stdlib=libc++"
-CXXLINK="-L$CXX18/lib -Wl,-rpath-link,$CXX18/lib"
+# -stdlib=libc++ стоит ТОЛЬКО среди доводов связывания: при сборке он не нужен,
+# а Meson проверяет пробники с -Werror=unused-command-line-argument, и лишний
+# довод превращается в ошибку.
+CXXSTD="-nostdinc++ -isystem $CXX18/include/c++/v1"
+CXXLINK="-stdlib=libc++ -L$CXX18/lib -Wl,-rpath-link,$CXX18/lib"
 
 # --- Описание перекрёстной сборки для CMake -----------------------------------
 # Два: одно без стандартной библиотеки C++ (ею мы и собираем саму libc++),
@@ -221,12 +239,12 @@ needs_exe_wrapper = true
 prefix = '$PREFIX'
 c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include', '-DU_DISABLE_RENAMING=1']
 cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include', '-DU_DISABLE_RENAMING=1',
-            '-nostdinc++', '-isystem', '$CXX18/include/c++/v1', '-stdlib=libc++']
+            '-nostdinc++', '-isystem', '$CXX18/include/c++/v1']
 c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib',
                '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET']
-cpp_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib',
-                 '-L$CXX18/lib', '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET',
-                 '-Wl,-rpath-link,$CXX18/lib']
+cpp_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-stdlib=libc++',
+                 '-L$NDK/llvm/lib/$TARGET', '-L$PREFIX/lib', '-L$CXX18/lib',
+                 '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET', '-Wl,-rpath-link,$CXX18/lib']
 
 [host_machine]
 system = 'linux'
@@ -260,7 +278,8 @@ if ! done_already libcxx18; then
     say "libc++ $V_LLVM"
     fetch "llvm-project-$V_LLVM.src" "llvm-project-$V_LLVM.src.tar.xz" \
         "https://github.com/llvm/llvm-project/releases/download/llvmorg-$V_LLVM/llvm-project-$V_LLVM.src.tar.xz"
-    rm -rf "$BLD/libcxx18"
+    rm -rf "$BLD/libcxx18"; : > "$LOGS/libcxx18.log"
+    run_logged libcxx18 \
     cmake -S "$SRC/llvm-project-$V_LLVM.src/runtimes" -B "$BLD/libcxx18" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$WPE/ohos-bootstrap.toolchain.cmake" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -273,8 +292,8 @@ if ! done_already libcxx18; then
         -DLIBUNWIND_ENABLE_SHARED=ON -DLIBUNWIND_ENABLE_STATIC=ON \
         -DLIBCXXABI_USE_LLVM_UNWINDER=ON \
         -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
-        -DLIBCXXABI_INCLUDE_TESTS=OFF -DLIBUNWIND_INCLUDE_TESTS=OFF >/dev/null
-    ninja -C "$BLD/libcxx18" install >/dev/null
+        -DLIBCXXABI_INCLUDE_TESTS=OFF -DLIBUNWIND_INCLUDE_TESTS=OFF
+    run_logged libcxx18 ninja -C "$BLD/libcxx18" install
     mark_done libcxx18
 fi
 
@@ -408,15 +427,16 @@ if ! done_already fontconfig; then
     say "fontconfig $V_FONTCONFIG"
     fetch "fontconfig-$V_FONTCONFIG" "fontconfig-$V_FONTCONFIG.tar.xz" \
         "https://www.freedesktop.org/software/fontconfig/release/fontconfig-$V_FONTCONFIG.tar.xz"
-    rm -rf "$BLD/fontconfig" "$STAGE/fontconfig"
-    meson setup "$BLD/fontconfig" "$SRC/fontconfig-$V_FONTCONFIG" \
+    rm -rf "$BLD/fontconfig" "$STAGE/fontconfig"; : > "$LOGS/fontconfig.log"
+    run_logged fontconfig meson setup "$BLD/fontconfig" "$SRC/fontconfig-$V_FONTCONFIG" \
         --cross-file "$WPE/ohos.cross" --buildtype release --sysconfdir /system/etc \
         -Ddoc=disabled -Dtests=disabled -Dtools=disabled -Dnls=disabled \
         -Dcache-build=disabled \
         -Dbaseconfig-dir=/system/etc/fonts \
         -Dtemplate-dir=/system/etc/fonts/conf.avail \
-        -Dxml-dir=/system/etc/fonts >/dev/null
-    DESTDIR="$STAGE/fontconfig" ninja -C "$BLD/fontconfig" install >/dev/null
+        -Dxml-dir=/system/etc/fonts
+    ( export DESTDIR="$STAGE/fontconfig"
+      run_logged fontconfig ninja -C "$BLD/fontconfig" install )
     cp -a "$STAGE/fontconfig$PREFIX/." "$PREFIX/"
     mark_done fontconfig
 fi
@@ -471,12 +491,13 @@ if ! done_already openssl; then
     fetch "openssl-$V_OPENSSL" "openssl-$V_OPENSSL.tar.gz" \
         "https://www.openssl.org/source/openssl-$V_OPENSSL.tar.gz"
     rm -rf "$BLD/openssl"; mkdir -p "$BLD/openssl"; cd "$BLD/openssl"
-    "$SRC/openssl-$V_OPENSSL/Configure" linux-x86_64 \
+    : > "$LOGS/openssl.log"
+    run_logged openssl "$SRC/openssl-$V_OPENSSL/Configure" linux-x86_64 \
         --prefix="$PREFIX" --openssldir=/system/etc/ssl \
         no-shared no-tests no-asm \
-        CC="clang-18" CFLAGS="$OH $CFLAGS_COMMON" AR="$AR" RANLIB="$RANLIB" >/dev/null
-    make -j"$JOBS" >/dev/null
-    make install_sw >/dev/null
+        CC="clang-18" CFLAGS="$OH $CFLAGS_COMMON" AR="$AR" RANLIB="$RANLIB"
+    run_logged openssl make -j"$JOBS"
+    run_logged openssl make install_sw
     # OpenSSL для этой цели складывает всё в lib64 — переносим к остальным.
     if [ -d "$PREFIX/lib64" ]; then
         mv "$PREFIX/lib64/"*.a "$PREFIX/lib/" 2>/dev/null || true
@@ -520,11 +541,12 @@ if ! done_already gnet; then
     say "glib-networking $V_GNET"
     fetch "glib-networking-$V_GNET" "glib-networking-$V_GNET.tar.xz" \
         "https://download.gnome.org/sources/glib-networking/${V_GNET%.*}/glib-networking-$V_GNET.tar.xz"
-    rm -rf "$BLD/gnet"
-    meson setup "$BLD/gnet" "$SRC/glib-networking-$V_GNET" --cross-file "$WPE/ohos.cross" \
-        --buildtype release -Dgnutls=disabled -Dopenssl=enabled -Dlibproxy=disabled \
-        -Dgnome_proxy=disabled -Dinstalled_tests=false >/dev/null
-    ninja -C "$BLD/gnet" install >/dev/null 2>&1 || true
+    rm -rf "$BLD/gnet"; : > "$LOGS/gnet.log"
+    run_logged gnet meson setup "$BLD/gnet" "$SRC/glib-networking-$V_GNET" \
+        --cross-file "$WPE/ohos.cross" --buildtype release \
+        -Dgnutls=disabled -Dopenssl=enabled -Dlibproxy=disabled \
+        -Dgnome_proxy=disabled -Dinstalled_tests=false
+    ninja -C "$BLD/gnet" install >>"$LOGS/gnet.log" 2>&1 || true
     [ -f "$PREFIX/lib/gio/modules/libgioopenssl.so" ] \
         || die "glib-networking не поставила libgioopenssl.so"
     mark_done gnet
