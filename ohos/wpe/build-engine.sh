@@ -28,6 +28,34 @@ if [ ! -d "$SRC/wpewebkit-$V_WPE" ]; then
 fi
 
 # ==============================================================================
+#  Правки к исходникам
+# ==============================================================================
+# В patches/ лежат исправления, которые нужны нам и которых нет в выпуске.
+# Почти все — об одном и том же: WPE без видео и без GStreamer у разработчиков
+# не проверяется, поэтому часть файлов собирается безусловно, хотя то, на что
+# они опираются, при выключенном видео не порождается.
+#
+# Накладываются заново при каждом запуске. Если правка уже на месте — пропуск,
+# так что распаковывать исходники заново не требуется.
+
+WKSRC=$SRC/wpewebkit-$V_WPE
+if [ -d "$WPE/patches" ]; then
+    say "правки к исходникам"
+    for p in "$WPE"/patches/*.patch; do
+        [ -e "$p" ] || continue
+        name=$(basename "$p")
+        if patch -p1 -d "$WKSRC" --dry-run --forward --silent < "$p" >/dev/null 2>&1; then
+            patch -p1 -d "$WKSRC" --forward --silent < "$p" >/dev/null
+            echo "    наложена:     $name"
+        elif patch -p1 -d "$WKSRC" --dry-run --reverse --silent < "$p" >/dev/null 2>&1; then
+            echo "    уже на месте: $name"
+        else
+            die "правка не ложится: $name"
+        fi
+    done
+fi
+
+# ==============================================================================
 #  Настройка
 # ==============================================================================
 # Ниже каждая группа отключений объяснена. Общий замысел: собрать движок,
@@ -35,6 +63,112 @@ fi
 # позже по одному, когда будет что показывать.
 
 if [ ! -f "$BLD/wpe/build.ninja" ]; then
+say "настройка"
+cmake -S "$SRC/wpewebkit-$V_WPE" -B "$BLD/wpe" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$WPE/ohos.toolchain.cmake" \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPORT=WPE \
+    \
+    `# --- Площадки вывода ---------------------------------------------------` \
+    `# WPEPlatform — новый способ вывода, он нам и нужен: под него мы будем` \
+    `# писать свою площадку поверх поверхности OpenHarmony.` \
+    `# Пока включена только безэкранная: она даёт работающий движок, который` \
+    `# рисует в память, и позволяет проверить всё остальное до того, как` \
+    `# появится вывод на экран.` \
+    -DENABLE_WPE_PLATFORM=ON \
+    -DENABLE_WPE_PLATFORM_HEADLESS=ON \
+    -DENABLE_WPE_PLATFORM_DRM=OFF \
+    -DENABLE_WPE_PLATFORM_WAYLAND=OFF \
+    `# Прежний способ (libwpe) — отдельная библиотека и отдельный слой;` \
+    `# на OpenHarmony он не нужен и только добавил бы зависимость.` \
+    -DENABLE_WPE_LEGACY_API=OFF \
+    -DENABLE_WPE_QT_API=OFF \
+    \
+    `# --- Звук и видео ------------------------------------------------------` \
+    `# Отключены целиком. Это убирает GStreamer — самую тяжёлую зависимость` \
+    `# из всех возможных. Воспроизведение будем приделывать отдельно, через` \
+    `# собственные средства OpenHarmony, а не через GStreamer.` \
+    -DENABLE_VIDEO=OFF \
+    -DENABLE_WEB_AUDIO=OFF \
+    -DENABLE_MEDIA_STREAM=OFF \
+    -DENABLE_WEB_RTC=OFF \
+    -DENABLE_WEB_CODECS=OFF \
+    -DUSE_GSTREAMER=OFF \
+    \
+    `# --- Разборщики изображений сверх обычных ------------------------------` \
+    `# PNG, JPEG и WebP включены (мы их собрали). Эти три — нет: они требуют` \
+    `# ещё трёх библиотек ради форматов, которые встречаются редко.` \
+    -DUSE_JPEGXL=OFF \
+    -DUSE_AVIF=OFF \
+    -DUSE_LCMS=OFF \
+    \
+    `# --- Текстовое -----------------------------------------------------------` \
+    `# XSLT — преобразование разметки, почти вымерший способ; тянет libxslt.` \
+    `# WOFF2 — ещё один вид сжатия шрифтов, обычных WOFF хватает.` \
+    `# Переносы слов требуют libhyphen и словарей на каждый язык.` \
+    -DENABLE_XSLT=OFF \
+    -DUSE_WOFF2=OFF \
+    -DUSE_LIBHYPHEN=OFF \
+    \
+    `# --- Проверка правописания и речь --------------------------------------` \
+    `# Требуют enchant со словарями и flite соответственно.` \
+    -DENABLE_SPELLCHECK=OFF \
+    -DENABLE_SPEECH_SYNTHESIS=OFF \
+    -DUSE_FLITE=OFF \
+    \
+    `# --- Доступность ---------------------------------------------------------` \
+    `# ATK — настольный способ связи с чтецами экрана. В OpenHarmony свой,` \
+    `# и соединять их придётся отдельной работой.` \
+    -DUSE_ATK=OFF \
+    \
+    `# --- Прямой доступ к видеоустройству -------------------------------------` \
+    `# Мы выводим через поверхность OpenHarmony, а не через DRM напрямую,` \
+    `# поэтому libdrm и gbm не нужны. Следствие: отключается и отдельный` \
+    `# процесс отрисовки (он опирается на gbm).` \
+    -DUSE_LIBDRM=OFF \
+    -DUSE_GBM=OFF \
+    \
+    `# --- Прочее --------------------------------------------------------------` \
+    `# Песочница на bubblewrap опирается на возможности ядра и на отдельную` \
+    `# утилиту; на OpenHarmony разграничение устроено своими средствами.` \
+    -DENABLE_BUBBLEWRAP_SANDBOX=OFF \
+    -DENABLE_GAMEPAD=OFF \
+    -DENABLE_WEBDRIVER=OFF \
+    -DENABLE_MINIBROWSER=OFF \
+    -DENABLE_INTROSPECTION=OFF \
+    -DENABLE_DOCUMENTATION=OFF \
+    -DENABLE_JOURNALD_LOG=OFF \
+    -DUSE_LIBBACKTRACE=OFF \
+    -DUSE_SYSPROF_CAPTURE=OFF \
+    -DDEVELOPER_MODE=OFF
+fi
+
+# ==============================================================================
+#  Сборка
+# ==============================================================================
+# Около восьми тысяч единиц перевода. На обычной машине — час-полтора.
+
+# При первом заходе WebKit иногда спотыкается о собственную гонку: заголовок
+# ещё копируется, а предварительно скомпилированный блок уже начали собирать.
+# Поэтому один повтор делаем сами.
+say "сборка (журнал: $WPE/build-engine.log)"
+for attempt in 1 2; do
+    ninja -C "$BLD/wpe" 2>&1 | tee "$WPE/build-engine.log" | \
+        grep -E --line-buffered "^\[[0-9]+/|FAILED" || true
+    grep -q "FAILED" "$WPE/build-engine.log" || break
+    [ "$attempt" = 2 ] && \
+        die "сборка не прошла; посмотрите: grep -n 'error:' -A6 $WPE/build-engine.log | head -60"
+    say "повтор после сбоя"
+done
+
+say "установка"
+DESTDIR="$STAGE/wpe" ninja -C "$BLD/wpe" install >/dev/null
+cp -a "$STAGE/wpe$PREFIX/." "$PREFIX/"
+
+say "готово"
+ls -1 "$PREFIX/lib" | grep -i wpe | sed 's/^/    /'
+ls -1 "$PREFIX/libexec/wpe-webkit-2.0" 2>/dev/null | sed 's/^/    /' || trueif [ ! -f "$BLD/wpe/build.ninja" ]; then
 say "настройка"
 cmake -S "$SRC/wpewebkit-$V_WPE" -B "$BLD/wpe" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$WPE/ohos.toolchain.cmake" \
