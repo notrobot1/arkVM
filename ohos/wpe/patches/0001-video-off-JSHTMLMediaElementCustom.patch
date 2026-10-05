@@ -1,0 +1,29 @@
+Сборка без видео: обрамить JSHTMLMediaElementCustom.cpp проверкой ENABLE(VIDEO)
+
+Файл записан в общий список исходников WebCore безусловно, но привязка
+JSHTMLMediaElement порождается только при включённом видео. При
+-DENABLE_VIDEO=OFF сборка падает на «use of undeclared identifier
+JSHTMLMediaElement».
+
+Это недосмотр самого WebKit: сочетание «WPE без видео» у них не проверяется,
+потому что основной путь воспроизведения — GStreamer, и в их сборках видео
+включено всегда.
+
+--- a/Source/WebCore/bindings/js/JSHTMLMediaElementCustom.cpp
++++ b/Source/WebCore/bindings/js/JSHTMLMediaElementCustom.cpp
+@@ -24,6 +24,9 @@
+  */
+
+ #include "config.h"
++
++#if ENABLE(VIDEO)
++
+ #include "JSHTMLMediaElement.h"
+
+ #include "TrackOpaqueRoot.h"
+@@ -40,3 +43,5 @@
+ DEFINE_VISIT_ADDITIONAL_CHILDREN_IN_GC_THREAD(JSHTMLMediaElement);
+
+ } // namespace WebCore
++
++#endif // ENABLE(VIDEO)
