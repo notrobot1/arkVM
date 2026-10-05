@@ -1,17 +1,8 @@
 Сборка без libdrm: запасные определения кодов форматов буферов
 
-AcceleratedBackingStore.cpp берёт DRM_FORMAT_XRGB8888 из заголовка libdrm,
-который подключается только при USE(LIBDRM) или на Android. При сборке без
-libdrm (мы выводим через поверхность системы, а не через DRM напрямую) файл
-не собирается.
-
-Сами коды форматов к libdrm отношения не имеют: это четырёхбуквенные
-обозначения из общего соглашения о расположении точек в буфере, одинаковые
-везде. Поэтому достаточно задать их, если заголовка нет.
-
 --- a/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp
 +++ b/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp
-@@ -41,6 +41,16 @@
+@@ -42,4 +42,13 @@
  #elif USE(LIBDRM)
  #include <drm_fourcc.h>
  #endif
@@ -26,4 +17,3 @@ libdrm (мы выводим через поверхность системы, а
 +#endif
 
  WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
- #include <skia/core/SkColorSpace.h>
