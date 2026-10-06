@@ -549,6 +549,18 @@ group("all") {
 
     "//foundation/filemanagement/file_api/interfaces/kits/c/fileio:ohfileio",
     "//foundation/filemanagement/disk_manager:disk_manager_all",
+"//third_party/gptfdisk:sgdisk",
+    "//foundation/multimedia/media_library/interfaces/kits/js:photoaccesshelpernative",
+    "//foundation/multimedia/media_library/interfaces/kits/js:photoaccesshelper",
+    "//foundation/multimedia/media_library/interfaces/kits/js:userfilemanager",
+
+    "//foundation/communication/netmanager_base/services/netmanagernative:netsys_native_manager",
+    "//foundation/communication/netmanager_base/services/netconnmanager:net_conn_manager",
+    "//foundation/communication/netmanager_base/services/netsyscontroller:netsys_controller",
+
+
+
+
 
 ]
 }
