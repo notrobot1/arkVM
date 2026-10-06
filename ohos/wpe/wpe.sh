@@ -1,15 +1,15 @@
 #!/bin/sh
-# Запуск контейнера сборки. Выполняется на хозяйской машине.
+# Запуск сборки. Выполняется на хозяйской машине.
 #
 #   ./wpe.sh            — собрать образ (если нужно) и войти в оболочку
-#   ./wpe.sh build      — собрать образ и сразу запустить сборку зависимостей
-#   ./wpe.sh deps       — только сборка зависимостей (образ уже есть)
-#   ./wpe.sh engine     — сборка самого WPE WebKit
+#   ./wpe.sh build      — образ, зависимости и движок подряд
 #   ./wpe.sh image      — только пересобрать образ
+#   ./wpe.sh deps       — только зависимости
+#   ./wpe.sh engine     — только движок
+#   ./wpe.sh deploy     — перенести собранное в настоящий /system (нужен sudo)
 #
-# Каталог /mnt/ohos подключается внутрь по тому же пути, поэтому все записи
-# в наших заметках и в файлах настройки перекрёстной сборки совпадают с тем,
-# что видно изнутри.
+# Всё собирается так, будто будет жить в /system, но кладётся в stage/root.
+# Перенос в настоящий /system — отдельным шагом, deploy.
 
 set -e
 
@@ -36,7 +36,10 @@ case "${1:-shell}" in
     image)  build_image ;;
     shell)  build_image; run bash ;;
     deps)   run bash "$WPE_DIR/build-deps.sh" ;;
-    build)  build_image; run bash "$WPE_DIR/build-deps.sh" ;;
     engine) run bash "$WPE_DIR/build-engine.sh" ;;
+    deploy) sh "$WPE_DIR/deploy.sh" ;;
+    build)  build_image
+            run bash "$WPE_DIR/build-deps.sh"
+            run bash "$WPE_DIR/build-engine.sh" ;;
     *)      echo "неизвестная команда: $1"; exit 1 ;;
 esac
