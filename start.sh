@@ -258,6 +258,21 @@ ensure_dirs() {
     chmod 2770 /data/service/el1/public/database/ufs_db
 
 
+
+    # Точка подключения съёмных носителей. Распорядитель хранилища создаёт
+    # под ней каталог на каждый том по его опознавателю, но сам родительский
+    # каталог заводит init, а не он: без него подключение срывается
+    # с «parent directory doesn't exist».
+    mkdir -p /mnt/data/external
+    chmod 0755 /mnt/data/external
+
+
+    mkdir -p /data/misc
+    mkdir -p /data/service/el1/public/storage_daemon/share/public
+    mkdir -p /data/service/el1/public/themes/100/{a/system,b/system,fa,share}
+    mkdir -p /storage/cloud/100/files/.thumbs/Photo
+
+mkdir -p /data/service/el1/public/netsysnative
 }
 
 
@@ -328,6 +343,23 @@ install_hap() {
     install -m 644 "$src" "$dir/$name" && echo "  $name"
 }
 
+install_netmanager() {
+    copy_out "$LIB" \
+        libnetsys_native_manager.z.so \
+        libnet_conn_manager.z.so \
+        libnetsys_controller.z.so \
+        libnet_manager_common.z.so \
+        libnet_service_common.z.so
+
+    # Служба 1158 живёт в своём процессе netsysnative,
+    # служба 1151 — в процессе netmanager.
+    install -Dm644 "$TREE/foundation/communication/netmanager_base/sa_profile/1158.json" \
+        "$SYSTEM/profile/netsysnative.json"
+    install -Dm644 "$TREE/foundation/communication/netmanager_base/sa_profile/1151.json" \
+        "$SYSTEM/profile/netmanager.json"
+}
+
+
 install_fonts() {
     echo "шрифты"
     local f src
@@ -394,7 +426,7 @@ install_all() {
 
     echo "локальные цели arkvm"
     local t p
-    for t in sa_main samgr_client arkvm_param_service arkvm_token_init hiview hisysevent; do
+    for t in sa_main samgr_client arkvm_param_service arkvm_token_init hiview hisysevent sgdisk; do
         p=$(find "$OUT" -name "$t" -type f -perm -111 \
                  -not -path "*/obj/*" -not -path "*unstripped*" \
                  -not -path "*/clang_x64/*" | head -1)
@@ -945,6 +977,17 @@ EOF
     install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/storage_daemon/disk_config
     install -m 644 "$SCRIPT_DIR/etc/disk_config" /system/etc/disk_manager/disk_config
 
+
+    echo "доступ к снимкам"
+    # Загрузчик ищет модуль как lib<имя>.z.so, затем lib<имя>_napi.z.so;
+    # для 'file.photoAccessHelper' это libphotoaccesshelper.z.so. Цель же
+    # зовётся photoaccesshelpernative и даёт другое имя — связываем.
+    ln -sf libphotoaccesshelpernative.z.so "$LIB/module/file/libphotoaccesshelper.z.so"
+
+
+
+
+
     echo "готово"
 }
 
@@ -1041,10 +1084,20 @@ stop_all() {
              distributeddata screenlock_server useriam powermgr audio_server \
              bluetooth_service wifi_manager_service ui_service huks_service \
              deviceauth_service softbus_server device_manager \
-             com.ohos.sceneboard file_access_service ; do
+             com.ohos.sceneboard netsysnative netmanager file_access_service ; do
         pkill -f "^$p" 2>/dev/null
     done
 
+
+
+    # Съёмные носители остаются подключёнными после остановки стенда, и при
+    # следующем запуске распорядитель дисков не может занять точку
+    # подключения: каталог занят, подключение срывается с «устройство занято».
+    for m in /mnt/data/external/*; do
+        [ -d "$m" ] || continue
+        umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+        rmdir "$m" 2>/dev/null
+    done
 
 }
 
@@ -1301,6 +1354,14 @@ start_bg storage_daemon "$BIN/storage_daemon"
 sleep 1
 
 start_sa    storage_manager 5003
+
+
+
+
+start_bg netsysnative python3 "$SCRIPT_DIR/netsys_wrapper.py"
+start_sa_opt netmanager 1151
+
+
 
 # Распределённое хранилище поднимаем до менеджера учётных записей: тот при
 # первой же активации записи пишет её состояние через это хранилище и без
