@@ -481,11 +481,27 @@ if ! done_already gpgerror; then
         --disable-nls --disable-doc --disable-tests --enable-threads=posix
 fi
 
+# libgcrypt ищет сведения о libgpg-error через сценарий gpg-error-config.
+# Настоящий назвал бы пути на устройстве (/system/...), которых на машине
+# сборки нет, поэтому подкладываем свой — с путями промежуточного корня.
 if ! done_already gcrypt; then
+    mkdir -p "$SYSDIR/bin"
+    cat > "$SYSDIR/bin/gpg-error-config" <<EOF
+#!/bin/sh
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        --version) echo "$V_GPGERR" ;;
+        --cflags)  echo "-I$SYSDIR/include" ;;
+        --libs)    echo "-L$SYSDIR/lib64 -lgpg-error" ;;
+    esac
+    shift
+done
+EOF
+    chmod +x "$SYSDIR/bin/gpg-error-config"
+
     fetch "libgcrypt-$V_GCRYPT" "libgcrypt-$V_GCRYPT.tar.bz2" \
         "https://gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-$V_GCRYPT.tar.bz2"
     export gl_cv_have_weak=no
-    # gpgrt-config — обычный сценарий оболочки, он установился в stage.
     autotools gcrypt "libgcrypt-$V_GCRYPT" --disable-shared --enable-static \
         --disable-doc --disable-tests --with-libgpg-error-prefix="$SYSDIR"
 fi
