@@ -78,7 +78,10 @@ const char *PERMS[] = {
     "ohos.permission.FILE_ACCESS_MANAGER",
     "ohos.permission.CONNECT_FILE_ACCESS_EXTENSION",
     "ohos.permission.CHECK_SANDBOX_POLICY",
-
+    "ohos.permission.MANAGE_NET_STRATEGY",
+    "ohos.permission.GET_NETWORK_INFO",
+    "ohos.permission.CONNECTIVITY_INTERNAL",
+    "ohos.permission.INTERNET",
 };
 
 // Имена процессов ровно те, под которыми они видны в /proc/<pid>/cmdline.
@@ -120,7 +123,9 @@ const char *PROCESSES[] = {
     "wifi_manager_service",
 "deviceauth_service",
 "file_access_service",
-
+"disk_manager",
+"netsysnative",
+"netmanager",
 };
 
 constexpr const char *BYNAME_DIR = "/data/service/el0/access_token/byname";
