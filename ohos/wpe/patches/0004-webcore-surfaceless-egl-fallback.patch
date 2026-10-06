@@ -1,0 +1,45 @@
+WebCore: запасной путь получения подключения к EGL без «безэкранного» способа
+
+PlatformDisplaySurfaceless — это подключение к видеоподсистеме, которым
+пользуется сам обработчик страниц, отдельно от площадки WPE. Он умеет только
+«безэкранный» способ (EGL_MESA_platform_surfaceless), а при неудаче не
+возвращает отказ, а роняет процесс.
+
+В OpenHarmony libEGL — переходник поверх Mesa. Обычное подключение
+(eglGetDisplay с EGL_DEFAULT_DISPLAY) даёт полноценный EGL 1.5 со всеми
+нужными расширениями, а «безэкранный» способ переходник обрабатывает неверно.
+
+Поэтому: если «безэкранный» не вышел, берём обычное подключение. Для этого
+места разницы нет — рисование всё равно идёт в память.
+
+--- a/Source/WebCore/platform/graphics/egl/PlatformDisplaySurfaceless.cpp
++++ b/Source/WebCore/platform/graphics/egl/PlatformDisplaySurfaceless.cpp
+@@ -34,15 +34,19 @@
+ std::unique_ptr<PlatformDisplaySurfaceless> PlatformDisplaySurfaceless::create()
+ {
+     const char* extensions = eglQueryString(nullptr, EGL_EXTENSIONS);
+-    if (!GLContext::isExtensionSupported(extensions, "EGL_MESA_platform_surfaceless"))
+-        return nullptr;
+-
+-    RefPtr<GLDisplay> glDisplay;
+-    if (GLContext::isExtensionSupported(extensions, "EGL_EXT_platform_base"))
+-        glDisplay = GLDisplay::create(eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr));
+-    else if (GLContext::isExtensionSupported(extensions, "EGL_KHR_platform_base"))
+-        glDisplay = GLDisplay::create(eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr));
+-
++    RefPtr<GLDisplay> glDisplay;
++    if (GLContext::isExtensionSupported(extensions, "EGL_MESA_platform_surfaceless")) {
++        if (GLContext::isExtensionSupported(extensions, "EGL_EXT_platform_base"))
++            glDisplay = GLDisplay::create(eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr));
++        else if (GLContext::isExtensionSupported(extensions, "EGL_KHR_platform_base"))
++            glDisplay = GLDisplay::create(eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr));
++    }
++
++    /* Запасной путь: «безэкранного» способа подключения может не быть
++       (так в OpenHarmony), но обычное подключение работает. */
++    if (!glDisplay)
++        glDisplay = GLDisplay::create(eglGetDisplay(EGL_DEFAULT_DISPLAY));
++
+     if (!glDisplay) {
+         WTFLogAlways("Could not create surfaceless EGL display: %s. Aborting...", GLContext::lastErrorString());
+         CRASH();
