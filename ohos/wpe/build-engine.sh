@@ -19,6 +19,13 @@ die() { printf '\n\033[1;31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 [ -f "$WPE/ohos.toolchain.cmake" ] || die "сначала ./wpe.sh deps"
 [ -f "$SYSDIR/lib64/pkgconfig/libsoup-3.0.pc" ] || die "сначала ./wpe.sh deps"
 
+# Поиск описаний — только в нашем промежуточном корне. Без этого CMake
+# подхватывает описания машины сборки (например, её собственную glib)
+# и получает чужие версии и пути.
+export PKG_CONFIG_SYSROOT_DIR="$STAGE"
+export PKG_CONFIG_LIBDIR="$SYSDIR/lib64/pkgconfig"
+export PKG_CONFIG_PATH="$SYSDIR/lib64/pkgconfig"
+
 mkdir -p "$SRC" "$BLD"
 if [ ! -d "$SRC/wpewebkit-$V_WPE" ]; then
     say "исходники WPE WebKit $V_WPE"
