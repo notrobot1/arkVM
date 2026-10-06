@@ -334,9 +334,10 @@ meson_build glib "glib-$V_GLIB" \
 
 # В описании glib записаны пути к её утилитам (glib-mkenums, glib-genmarshal
 # и прочим). Но там сборки под OpenHarmony, а запускаться эти утилиты должны
-# здесь. Перенаправляем на системные — иначе harfbuzz и libsoup спотыкаются
-# ещё при настройке.
-sed -i 's|\${bindir}/|/usr/bin/|g' \
+# здесь. Убираем путь совсем, оставляя одни имена: тогда они ищутся по PATH
+# и находятся системные. Абсолютный путь не годится — pkg-config припишет
+# к нему промежуточный корень.
+sed -i 's|\${bindir}/||g' \
     "$SYSDIR/lib64/pkgconfig/glib-2.0.pc" \
     "$SYSDIR/lib64/pkgconfig/gio-2.0.pc" \
     "$SYSDIR/lib64/pkgconfig/gobject-2.0.pc"
