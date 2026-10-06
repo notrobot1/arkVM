@@ -2,10 +2,15 @@
 # Сборка всех зависимостей WPE WebKit под OpenHarmony (x86_64, musl).
 # Запускается ВНУТРИ контейнера: ./wpe.sh deps
 #
-# Каждая библиотека собирается отдельно и отмечается меткой в out/.stamps,
-# поэтому повторный запуск продолжает с места остановки, а не начинает заново.
-# Чтобы пересобрать что-то одно — удалите его метку:
-#     rm /mnt/ohos/wpe/out/.stamps/glib && ./wpe.sh deps
+# Всё собирается так, будто будет жить в /system на устройстве, но кладётся
+# в промежуточный каталог stage/root. Оттуда ./wpe.sh deploy переносит это
+# в настоящий /system. Благодаря такому порядку все пути, вшитые в библиотеки
+# при сборке (где искать дополнения gio, ресурсы, настройки шрифтов,
+# вспомогательные процессы), сразу правильные.
+#
+# Каждая библиотека отмечается меткой в stamps/, поэтому повторный запуск
+# продолжает с места остановки. Чтобы пересобрать что-то одно:
+#     rm /mnt/ohos/wpe/stamps/glib && ./wpe.sh deps
 
 set -euo pipefail
 
@@ -13,21 +18,24 @@ set -euo pipefail
 #  Пути и версии
 # ==============================================================================
 
-TREE=/mnt/ohos/OpenHarmony-6.1-Release          # дерево исходников OpenHarmony
+TREE=/mnt/ohos/OpenHarmony-6.1-Release           # дерево исходников OpenHarmony
 NDK=$TREE/prebuilts/ohos-sdk/linux/26.0.0/native # пакет для разработчиков
 SYSROOT=$NDK/sysroot                             # заголовки и заглушки системы
 TARGET=x86_64-linux-ohos
 
 WPE=/mnt/ohos/wpe
-SRC=$WPE/src          # распакованные исходники
-BLD=$WPE/build        # каталоги сборки
-PREFIX=$WPE/out       # склад готовых библиотек (всё под OpenHarmony)
-STAGE=$WPE/stage      # промежуточная установка для того, что лезет вне склада
-CXX18=$WPE/libcxx18   # наша стандартная библиотека C++ 18-й версии
-SHIM=$WPE/shim        # подкладки под изъяны заголовков OpenHarmony
-RTDIR=$WPE/clang18-rt # подставной каталог времени исполнения для clang 18
-BDIR=$WPE/clang18-b   # пустые опорные объектные файлы
-STAMPS=$PREFIX/.stamps
+SRC=$WPE/src              # распакованные исходники
+BLD=$WPE/build            # каталоги сборки
+LOGS=$WPE/logs            # журналы по одному на библиотеку
+STAMPS=$WPE/stamps        # метки о том, что уже собрано
+CXX18=$WPE/libcxx18       # наша стандартная библиотека C++ (не в /system!)
+SHIM=$WPE/shim            # подкладки под изъяны заголовков
+RTDIR=$WPE/clang18-rt     # подставной каталог времени исполнения для clang 18
+BDIR=$WPE/clang18-b       # пустые опорные объектные файлы
+
+ROOT=/system              # куда всё встанет НА УСТРОЙСТВЕ
+STAGE=$WPE/stage/root     # промежуточный корень
+SYSDIR=$STAGE$ROOT        # .../stage/root/system
 
 V_LLVM=18.1.8
 V_FFI=3.4.6
@@ -67,19 +75,7 @@ die()  { printf '\n\033[1;31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 done_already() { [ -f "$STAMPS/$1" ]; }
 mark_done()    { mkdir -p "$STAMPS"; touch "$STAMPS/$1"; }
 
-# Скачать и распаковать, если ещё не распаковано.
-# fetch <имя-каталога-после-распаковки> <имя-файла> <ссылка>
-fetch() {
-    local dir="$1" file="$2" url="$3"
-    [ -d "$SRC/$dir" ] && return 0
-    [ -f "$SRC/$file" ] || curl -fL --retry 3 -o "$SRC/$file" "$url"
-    tar -C "$SRC" -xf "$SRC/$file"
-    [ -d "$SRC/$dir" ] || die "после распаковки нет каталога $SRC/$dir"
-}
-
-# Выполнить шаг, записывая весь вывод в журнал. При неудаче показать хвост
-# журнала и остановиться — иначе ошибка потерялась бы в тишине.
-LOGS=$WPE/logs
+# Выполнить шаг, записывая вывод в журнал; при неудаче показать хвост.
 run_logged() {
     local name="$1"; shift
     if ! "$@" >>"$LOGS/$name.log" 2>&1; then
@@ -90,8 +86,16 @@ run_logged() {
     fi
 }
 
+# Скачать и распаковать, если ещё не распаковано.
+fetch() {
+    local dir="$1" file="$2" url="$3"
+    [ -d "$SRC/$dir" ] && return 0
+    [ -f "$SRC/$file" ] || curl -fL --retry 3 -o "$SRC/$file" "$url"
+    tar -C "$SRC" -xf "$SRC/$file"
+    [ -d "$SRC/$dir" ] || die "после распаковки нет каталога $SRC/$dir"
+}
+
 # Сборка через обычный configure.
-# autotools <метка> <каталог-исходников> [доводы configure...]
 autotools() {
     local name="$1" srcdir="$2"; shift 2
     done_already "$name" && { warn "$name уже собран"; return 0; }
@@ -99,9 +103,9 @@ autotools() {
     rm -rf "$BLD/$name"; mkdir -p "$BLD/$name" "$LOGS"; : > "$LOGS/$name.log"
     cd "$BLD/$name"
     run_logged "$name" "$SRC/$srcdir/configure" \
-        --host=x86_64-unknown-linux-musl --prefix="$PREFIX" "$@"
+        --host=x86_64-unknown-linux-musl --prefix="$ROOT" --libdir="$ROOT/lib64" "$@"
     run_logged "$name" make -j"$JOBS"
-    run_logged "$name" make install
+    ( export DESTDIR="$STAGE"; run_logged "$name" make install )
     mark_done "$name"
 }
 
@@ -113,7 +117,7 @@ meson_build() {
     rm -rf "$BLD/$name"; mkdir -p "$LOGS"; : > "$LOGS/$name.log"
     run_logged "$name" meson setup "$BLD/$name" "$SRC/$srcdir" \
         --cross-file "$WPE/ohos.cross" --buildtype release "$@"
-    run_logged "$name" ninja -C "$BLD/$name" install
+    ( export DESTDIR="$STAGE"; run_logged "$name" ninja -C "$BLD/$name" install )
     mark_done "$name"
 }
 
@@ -125,12 +129,13 @@ cmake_build() {
     rm -rf "$BLD/$name"; mkdir -p "$LOGS"; : > "$LOGS/$name.log"
     run_logged "$name" cmake -S "$SRC/$srcdir" -B "$BLD/$name" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$WPE/ohos.toolchain.cmake" \
-        -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_BUILD_TYPE=Release "$@"
-    run_logged "$name" ninja -C "$BLD/$name" install
+        -DCMAKE_INSTALL_PREFIX="$ROOT" -DCMAKE_INSTALL_LIBDIR=lib64 \
+        -DCMAKE_BUILD_TYPE=Release "$@"
+    ( export DESTDIR="$STAGE"; run_logged "$name" ninja -C "$BLD/$name" install )
     mark_done "$name"
 }
 
-mkdir -p "$SRC" "$BLD" "$PREFIX" "$STAGE" "$STAMPS" "$LOGS"
+mkdir -p "$SRC" "$BLD" "$LOGS" "$STAMPS" "$SYSDIR/lib64/pkgconfig" "$SYSDIR/include"
 [ -d "$NDK" ] || die "нет пакета для разработчиков: $NDK"
 
 # ==============================================================================
@@ -142,8 +147,7 @@ say "подготовка среды"
 # --- Подкладка под заголовки ядра ---------------------------------------------
 # В пакете OpenHarmony заголовки ядра взяты из набора для Android: там
 # linux/socket.h объявляет sockaddr_storage, который musl уже объявил в
-# sys/socket.h. Любой исходник, включающий оба, не собирается. Отдаём только
-# то, чего в musl нет, а саму структуру берём оттуда.
+# sys/socket.h. Любой исходник, включающий оба, не собирается.
 mkdir -p "$SHIM/linux"
 cat > "$SHIM/linux/socket.h" <<'EOF'
 #ifndef _UAPI_LINUX_SOCKET_H
@@ -156,17 +160,15 @@ EOF
 
 # --- Опорные файлы для clang 18 -----------------------------------------------
 # Штатный clang ожидает crtbeginS.o и crtendS.o. В OpenHarmony их нет: musl
-# запускает начальные действия через .init_array, и содержать этим файлам
-# нечего. Делаем пустые, чтобы сборщик связей был доволен.
+# запускает начальные действия через .init_array, и содержать им нечего.
 mkdir -p "$BDIR"
 : > /tmp/empty.c
 for f in crtbeginS.o crtendS.o crtbegin.o crtend.o; do
     [ -f "$BDIR/$f" ] || clang-18 --target=$TARGET -c /tmp/empty.c -o "$BDIR/$f"
 done
 
-# Подставной каталог времени исполнения: заголовки берём от clang 18,
-# а готовую libclang_rt.builtins.a — из пакета OpenHarmony (она на C и
-# совместима между версиями).
+# Подставной каталог времени исполнения: заголовки от clang 18,
+# а libclang_rt.builtins.a — из пакета OpenHarmony (она на C и совместима).
 mkdir -p "$RTDIR/lib/$TARGET"
 ln -sfn /usr/lib/llvm-18/lib/clang/18/include "$RTDIR/include"
 cp -n "$NDK/llvm/lib/clang/15.0.4/lib/$TARGET/libclang_rt.builtins.a" \
@@ -175,23 +177,17 @@ cp -n "$NDK/llvm/lib/clang/15.0.4/lib/$TARGET/libclang_rt.builtins.a" \
 # --- Общие наборы доводов -----------------------------------------------------
 OH="--target=$TARGET --sysroot=$SYSROOT -resource-dir=$RTDIR -B$BDIR"
 # Каталога $NDK/llvm/lib/$TARGET здесь намеренно НЕТ: там лежит libc++_shared.so
-# от OpenHarmony (пятнадцатой версии), и сборщик связей хватал бы её вместо нашей.
-OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$PREFIX/lib"
-# U_DISABLE_RENAMING: ICU в OpenHarmony собран без приписывания номера версии
-# к именам вызовов, и заголовки надо об этом предупредить.
-CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$PREFIX/include"
+# от OpenHarmony (пятнадцатой версии), и сборщик связей хватал бы её.
+OHLINK="-fuse-ld=lld-18 --unwindlib=none -L$SYSDIR/lib64"
+CFLAGS_COMMON="-O2 -fPIC -I$SHIM -I$SYSDIR/include"
 # -nostdinc++ / -nostdlib++ отрезают стандартную библиотеку C++ от OpenHarmony
-# целиком: и её заголовки, и её саму. Довод -stdlib=libc++ использовать нельзя —
-# для цели OpenHarmony он подставляет libc++_shared.so пятнадцатой версии, и
-# наша восемнадцатая до строки связывания уже не доходит. Поэтому называем
-# нужные библиотеки прямо.
+# целиком. Довод -stdlib=libc++ использовать нельзя: для этой цели он
+# подставляет именно их libc++_shared.so.
 CXXSTD="-nostdinc++ -isystem $CXX18/include/c++/v1"
 CXXLINK="-nostdlib++ -L$CXX18/lib -Wl,-rpath-link,$CXX18/lib"
 CXXLIBS="-lc++ -lc++abi -lunwind"
 
 # --- Описание перекрёстной сборки для CMake -----------------------------------
-# Два: одно без стандартной библиотеки C++ (ею мы и собираем саму libc++),
-# второе — полное, для всего остального.
 cat > "$WPE/ohos-bootstrap.toolchain.cmake" <<EOF
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -208,7 +204,7 @@ set(CMAKE_ASM_FLAGS_INIT "$OH")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "$OHLINK")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$OHLINK")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "$OHLINK")
-set(CMAKE_FIND_ROOT_PATH $PREFIX $SYSROOT)
+set(CMAKE_FIND_ROOT_PATH $SYSDIR $SYSROOT)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
@@ -222,22 +218,20 @@ set(CMAKE_CXX_FLAGS_INIT "$OH $CFLAGS_COMMON $CXXSTD")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "$OHLINK $CXXLINK")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "$OHLINK $CXXLINK")
-set(CMAKE_PREFIX_PATH $PREFIX)
+set(CMAKE_PREFIX_PATH $SYSDIR)
 # Сюда попадает всё, что должно стоять в самом хвосте каждой строки
-# связывания. Через обычные доводы связывания это не задать: WebKit их
-# перетирает своими.
-#
-#   libc++, libc++abi, libunwind — наша стандартная библиотека C++;
-#   libsharpyuv — часть libwebp, вынесенная в отдельную библиотеку начиная
-#     с версии 1.3, но не упомянутая в описании libwebp;
+# связывания. Через обычные доводы связывания не задать: WebKit их перетирает.
+#   libc++/libc++abi/libunwind — наша стандартная библиотека C++;
+#   libsharpyuv — часть libwebp, вынесенная отдельно с версии 1.3, но не
+#     упомянутая в её описании;
 #   libintl — заглушка вместо перевода сообщений, которую glib собирает сама
-#     при -Dnls=disabled; на неё опирается WebKitWebContext.
-set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib $CXXLIBS -L$PREFIX/lib -lsharpyuv -lintl" CACHE STRING "")
+#     при -Dnls=disabled.
+set(CMAKE_CXX_STANDARD_LIBRARIES "-L$CXX18/lib $CXXLIBS -L$SYSDIR/lib64 -lsharpyuv -lintl" CACHE STRING "")
 EOF
 
 # --- Описание перекрёстной сборки для Meson -----------------------------------
-# Свойства sys_root намеренно НЕТ: наш склад лежит вне корня заголовков,
-# и с ним Meson приклеивал бы корень к путям из pkg-config.
+# sys_root указывает на промежуточный корень: описания из pkg-config содержат
+# пути вида /system/..., и к ним надо приписать stage/root.
 cat > "$WPE/ohos.cross" <<EOF
 [binaries]
 c = ['/usr/bin/clang-18', '--target=$TARGET', '--sysroot=$SYSROOT', '-resource-dir=$RTDIR', '-B$BDIR']
@@ -248,18 +242,20 @@ ranlib = '/usr/bin/llvm-ranlib-18'
 pkg-config = 'pkg-config'
 
 [properties]
-pkg_config_libdir = '$PREFIX/lib/pkgconfig'
+sys_root = '$STAGE'
+pkg_config_libdir = '$SYSDIR/lib64/pkgconfig'
 needs_exe_wrapper = true
 
 [built-in options]
-prefix = '$PREFIX'
-c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include']
-cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$PREFIX/include',
+prefix = '$ROOT'
+libdir = 'lib64'
+c_args = ['-O2', '-fPIC', '-I$SHIM', '-I$SYSDIR/include']
+cpp_args = ['-O2', '-fPIC', '-I$SHIM', '-I$SYSDIR/include',
             '-nostdinc++', '-isystem', '$CXX18/include/c++/v1']
-c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$PREFIX/lib',
+c_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-L$SYSDIR/lib64',
                '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET']
 cpp_link_args = ['-fuse-ld=lld-18', '--unwindlib=none', '-nostdlib++',
-                 '-L$PREFIX/lib', '-L$CXX18/lib',
+                 '-L$SYSDIR/lib64', '-L$CXX18/lib',
                  '-Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET', '-Wl,-rpath-link,$CXX18/lib',
                  '-lc++', '-lc++abi', '-lunwind']
 
@@ -279,17 +275,16 @@ export STRIP=llvm-strip-18
 export CFLAGS="$CFLAGS_COMMON"
 export CXXFLAGS="$CFLAGS_COMMON"
 export LDFLAGS="$OHLINK $CXXLINK $CXXLIBS -Wl,-rpath-link,$SYSROOT/usr/lib/$TARGET"
-export PKG_CONFIG_SYSROOT_DIR=/
-export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
-export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+export PKG_CONFIG_SYSROOT_DIR="$STAGE"
+export PKG_CONFIG_LIBDIR="$SYSDIR/lib64/pkgconfig"
+export PKG_CONFIG_PATH="$SYSDIR/lib64/pkgconfig"
 
 # ==============================================================================
 #  Шаг 1. Стандартная библиотека C++ 18-й версии
 # ==============================================================================
-# Берётся из исходников LLVM и собирается тем же clang 18.
-# Нужна потому, что libc++ из OpenHarmony — пятнадцатой версии, а WebKit 2.54
-# требует C++23. Собираем разделяемой: иначе каждая библиотека движка
-# и каждый его процесс получили бы свою копию описаний типов.
+# Собирается НЕ в /system: там уже лежит libc++.so от OpenHarmony, и установка
+# затёрла бы её. Нужные файлы перенесёт туда ./wpe.sh deploy, по именам,
+# которые с системными не сталкиваются (libc++.so.1 против libc++.so).
 
 if ! done_already libcxx18; then
     say "libc++ $V_LLVM"
@@ -330,9 +325,6 @@ autotools pcre2 "pcre2-$V_PCRE2" --disable-shared --enable-static --enable-unico
 # ==============================================================================
 #  Шаг 3. glib — опора всего остального в семействе
 # ==============================================================================
-# Отключено: перевод сообщений (в musl нет gettext), точки подключения дисков,
-# метки безопасности, расширенные свойства файлов — ничего из этого WebKit
-# не использует, а на OpenHarmony они работают иначе.
 
 fetch "glib-$V_GLIB" "glib-$V_GLIB.tar.xz" \
     "https://download.gnome.org/sources/glib/${V_GLIB%.*}/glib-$V_GLIB.tar.xz"
@@ -341,20 +333,17 @@ meson_build glib "glib-$V_GLIB" \
     -Dxattr=false -Dglib_assert=false -Dglib_checks=false
 
 # В описании glib записаны пути к её утилитам (glib-mkenums, glib-genmarshal
-# и прочим), и указывают они в наш склад. Но там лежат сборки под OpenHarmony,
-# а запускаться эти утилиты должны здесь, на машине сборки. Перенаправляем их
-# на системные — иначе harfbuzz и libsoup спотыкаются ещё при настройке.
-sed -i 's|${bindir}/|/usr/bin/|g' \
-    "$PREFIX/lib/pkgconfig/glib-2.0.pc" \
-    "$PREFIX/lib/pkgconfig/gio-2.0.pc" \
-    "$PREFIX/lib/pkgconfig/gobject-2.0.pc"
+# и прочим). Но там сборки под OpenHarmony, а запускаться эти утилиты должны
+# здесь. Перенаправляем на системные — иначе harfbuzz и libsoup спотыкаются
+# ещё при настройке.
+sed -i 's|\${bindir}/|/usr/bin/|g' \
+    "$SYSDIR/lib64/pkgconfig/glib-2.0.pc" \
+    "$SYSDIR/lib64/pkgconfig/gio-2.0.pc" \
+    "$SYSDIR/lib64/pkgconfig/gobject-2.0.pc"
 
 # ==============================================================================
-#  Шаг 4. Разбор клавиатуры и опрос возможностей видеоподсистемы
+#  Шаг 4. Разбор клавиатуры и позднее связывание с OpenGL ES
 # ==============================================================================
-# xkbcommon: раскладки. Отключён его справочник раскладок — он требует libxml2
-# и нужен лишь настольным оболочкам.
-# epoxy: позднее связывание с OpenGL ES. Ни X11, ни GLX нам не нужны.
 
 fetch "libxkbcommon-$V_XKB" "libxkbcommon-$V_XKB.tar.xz" \
     "https://xkbcommon.org/download/libxkbcommon-$V_XKB.tar.xz"
@@ -367,9 +356,8 @@ fetch "libepoxy-$V_EPOXY" "libepoxy-$V_EPOXY.tar.gz" \
 meson_build epoxy "libepoxy-$V_EPOXY" -Dglx=no -Dx11=false -Degl=yes -Dtests=false
 
 # ==============================================================================
-#  Шаг 5. Изображения
+#  Шаг 5. Изображения (zlib НЕ собираем: она есть в пакете OpenHarmony)
 # ==============================================================================
-# zlib НЕ собираем: она есть в пакете OpenHarmony (zlib.h + libz.so).
 
 fetch "libpng-$V_PNG" "libpng-$V_PNG.tar.gz" \
     "https://download.sourceforge.net/libpng/libpng-$V_PNG.tar.gz"
@@ -389,23 +377,20 @@ autotools webp "libwebp-$V_WEBP" --disable-shared --enable-static \
 # ==============================================================================
 #  Шаг 6. ICU
 # ==============================================================================
-# Сначала я хотел переиспользовать системный: на устройстве /system/lib64/libicu.so
-# — тонкий переходник к настоящим libhmicuuc и libhmicui18n. Но он выставляет
-# наружу лишь часть ICU: не хватает языковых соглашений (промежутки дат,
-# относительное время, разбор отформатированных значений), приведения регистра
-# с учётом языка и поиска по тексту. WebKit всё это использует.
+# Переходник /system/lib64/libicu.so от OpenHarmony выставляет наружу лишь
+# часть ICU: нет языковых соглашений, приведения регистра с учётом языка,
+# поиска по тексту. WebKit всё это использует, поэтому собираем свой —
+# версии 74.2, той же, что в дереве OpenHarmony.
 #
-# Поэтому собираем свой, версии 74.2 — ровно той, что в дереве OpenHarmony.
-# ICU особенная: её собственные средства сборки сперва надо получить для машины
-# сборки, и только потом строить саму библиотеку под цель. Отсюда два захода.
+# ICU особенная: сперва надо получить её собственные средства для машины
+# сборки, и только потом строить библиотеку под цель. Отсюда два захода.
 
 if ! done_already icu-host; then
     say "ICU $V_ICU — средства для машины сборки"
     fetch icu "icu4c-${V_ICU//./_}-src.tgz" \
         "https://github.com/unicode-org/icu/releases/download/release-${V_ICU//./-}/icu4c-${V_ICU//./_}-src.tgz"
-    rm -rf "$BLD/icu-host"; mkdir -p "$BLD/icu-host" "$LOGS"; : > "$LOGS/icu-host.log"
+    rm -rf "$BLD/icu-host"; mkdir -p "$BLD/icu-host"; : > "$LOGS/icu-host.log"
     cd "$BLD/icu-host"
-    # Заход для машины сборки: обычный компилятор, без наших доводов.
     ( unset CC CXX AR RANLIB STRIP CFLAGS CXXFLAGS LDFLAGS \
             PKG_CONFIG_LIBDIR PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR
       run_logged icu-host "$SRC/icu/source/configure" \
@@ -420,13 +405,13 @@ if ! done_already icu; then
     rm -rf "$BLD/icu"; mkdir -p "$BLD/icu"; : > "$LOGS/icu.log"
     cd "$BLD/icu"
     run_logged icu "$SRC/icu/source/configure" \
-        --host=x86_64-unknown-linux-musl --prefix="$PREFIX" \
+        --host=x86_64-unknown-linux-musl --prefix="$ROOT" --libdir="$ROOT/lib64" \
         --with-cross-build="$BLD/icu-host" \
         --enable-shared --disable-static \
         --disable-tests --disable-samples --disable-extras --disable-layoutex \
         --disable-tools
     run_logged icu make -j"$JOBS"
-    run_logged icu make install
+    ( export DESTDIR="$STAGE"; run_logged icu make install )
     mark_done icu
 fi
 
@@ -453,26 +438,15 @@ fetch "expat-$V_EXPAT" "expat-$V_EXPAT.tar.xz" \
 autotools expat "expat-$V_EXPAT" --disable-shared --enable-static \
     --without-examples --without-tests --without-docbook
 
-# fontconfig единственный ставит файлы вне нашего склада: его настройки должны
-# лежать там, где он будет их искать на устройстве (/system/etc/fonts).
-# Поэтому ставим в промежуточный каталог и переносим оттуда только библиотеку.
-if ! done_already fontconfig; then
-    say "fontconfig $V_FONTCONFIG"
-    fetch "fontconfig-$V_FONTCONFIG" "fontconfig-$V_FONTCONFIG.tar.xz" \
-        "https://www.freedesktop.org/software/fontconfig/release/fontconfig-$V_FONTCONFIG.tar.xz"
-    rm -rf "$BLD/fontconfig" "$STAGE/fontconfig"; : > "$LOGS/fontconfig.log"
-    run_logged fontconfig meson setup "$BLD/fontconfig" "$SRC/fontconfig-$V_FONTCONFIG" \
-        --cross-file "$WPE/ohos.cross" --buildtype release --sysconfdir /system/etc \
-        -Ddoc=disabled -Dtests=disabled -Dtools=disabled -Dnls=disabled \
-        -Dcache-build=disabled \
-        -Dbaseconfig-dir=/system/etc/fonts \
-        -Dtemplate-dir=/system/etc/fonts/conf.avail \
-        -Dxml-dir=/system/etc/fonts
-    ( export DESTDIR="$STAGE/fontconfig"
-      run_logged fontconfig ninja -C "$BLD/fontconfig" install )
-    cp -a "$STAGE/fontconfig$PREFIX/." "$PREFIX/"
-    mark_done fontconfig
-fi
+fetch "fontconfig-$V_FONTCONFIG" "fontconfig-$V_FONTCONFIG.tar.xz" \
+    "https://www.freedesktop.org/software/fontconfig/release/fontconfig-$V_FONTCONFIG.tar.xz"
+meson_build fontconfig "fontconfig-$V_FONTCONFIG" \
+    --sysconfdir /system/etc \
+    -Ddoc=disabled -Dtests=disabled -Dtools=disabled -Dnls=disabled \
+    -Dcache-build=disabled \
+    -Dbaseconfig-dir=/system/etc/fonts \
+    -Dtemplate-dir=/system/etc/fonts/conf.avail \
+    -Dxml-dir=/system/etc/fonts
 
 # ==============================================================================
 #  Шаг 8. Разбор разметки и база данных
@@ -491,10 +465,7 @@ autotools sqlite "sqlite-autoconf-$V_SQLITE" --disable-shared --enable-static --
 #  Шаг 9. Шифрование
 # ==============================================================================
 # gl_cv_have_weak=no — OpenHarmony выбросил из своей musl вызов pthread_cancel,
-# а libgpg-error использует его как признак «потоки подключены». Без этой
-# подсказки настройка выбирает путь со слабыми ссылками, рассчитанный на GNU.
-# Полное имя цели (x86_64-unknown-linux-musl) нужно, чтобы libgpg-error нашла
-# заранее вычисленное описание замков именно для musl.
+# а libgpg-error использует его как признак «потоки подключены».
 
 fetch "libtasn1-$V_TASN1" "libtasn1-$V_TASN1.tar.gz" \
     "https://ftp.gnu.org/gnu/libtasn1/libtasn1-$V_TASN1.tar.gz"
@@ -513,12 +484,13 @@ if ! done_already gcrypt; then
     fetch "libgcrypt-$V_GCRYPT" "libgcrypt-$V_GCRYPT.tar.bz2" \
         "https://gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-$V_GCRYPT.tar.bz2"
     export gl_cv_have_weak=no
+    # gpgrt-config — обычный сценарий оболочки, он установился в stage.
     autotools gcrypt "libgcrypt-$V_GCRYPT" --disable-shared --enable-static \
-        --disable-doc --disable-tests --with-libgpg-error-prefix="$PREFIX"
+        --disable-doc --disable-tests --with-libgpg-error-prefix="$SYSDIR"
 fi
 
-# OpenSSL собирается своим средством настройки, не autotools.
-# openssldir указывает, где искать доверенные удостоверения уже на устройстве.
+# OpenSSL собирается своим средством настройки.
+# openssldir — где искать доверенные удостоверения уже на устройстве.
 if ! done_already openssl; then
     say "openssl $V_OPENSSL"
     fetch "openssl-$V_OPENSSL" "openssl-$V_OPENSSL.tar.gz" \
@@ -526,27 +498,19 @@ if ! done_already openssl; then
     rm -rf "$BLD/openssl"; mkdir -p "$BLD/openssl"; cd "$BLD/openssl"
     : > "$LOGS/openssl.log"
     run_logged openssl "$SRC/openssl-$V_OPENSSL/Configure" linux-x86_64 \
-        --prefix="$PREFIX" --openssldir=/system/etc/ssl \
+        --prefix="$ROOT" --libdir=lib64 --openssldir=/system/etc/ssl \
         no-shared no-tests no-asm \
         CC="clang-18" CFLAGS="$OH $CFLAGS_COMMON" AR="$AR" RANLIB="$RANLIB"
     run_logged openssl make -j"$JOBS"
-    run_logged openssl make install_sw
-    # OpenSSL для этой цели складывает всё в lib64 — переносим к остальным.
-    if [ -d "$PREFIX/lib64" ]; then
-        mv "$PREFIX/lib64/"*.a "$PREFIX/lib/" 2>/dev/null || true
-        mv "$PREFIX/lib64/pkgconfig/"*.pc "$PREFIX/lib/pkgconfig/" 2>/dev/null || true
-        sed -i "s|/lib64|/lib|g" "$PREFIX/lib/pkgconfig/"{libcrypto,libssl,openssl}.pc
-    fi
+    ( export DESTDIR="$STAGE"; run_logged openssl make install_sw )
     mark_done openssl
 fi
 
 # ==============================================================================
 #  Шаг 10. Сеть
 # ==============================================================================
-# В сборке WPE нет выбора между libsoup и curl — сетевая часть прибита к libsoup.
-# libsoup тянет nghttp2 (HTTP/2) и libpsl (разбор доменных суффиксов).
-# Таблицу доменов в libpsl отключаем: она нужна для тонкостей с печеньем
-# на чужих доменах, а весит заметно.
+# В сборке WPE нет выбора между libsoup и curl — сетевая часть прибита
+# к libsoup. Та тянет nghttp2 (HTTP/2) и libpsl (доменные суффиксы).
 
 fetch "nghttp2-$V_NGHTTP2" "nghttp2-$V_NGHTTP2.tar.xz" \
     "https://github.com/nghttp2/nghttp2/releases/download/v$V_NGHTTP2/nghttp2-$V_NGHTTP2.tar.xz"
@@ -565,8 +529,7 @@ meson_build soup "libsoup-$V_SOUP" \
     -Dintrospection=disabled -Dvapi=disabled -Ddocs=disabled \
     -Dtests=false -Dtls_check=false
 
-# glib-networking даёт libsoup защищённые соединения. Берём путь через OpenSSL,
-# а не через gnutls: иначе пришлось бы собрать ещё четыре библиотеки.
+# glib-networking даёт libsoup защищённые соединения поверх OpenSSL.
 # Установка споткнётся на gio-querymodules — он собран под OpenHarmony и здесь
 # не запускается. Он лишь готовит список готовых дополнений; без списка gio
 # просматривает каталог сам. Поэтому ошибку глотаем и проверяем по файлу.
@@ -579,8 +542,8 @@ if ! done_already gnet; then
         --cross-file "$WPE/ohos.cross" --buildtype release \
         -Dgnutls=disabled -Dopenssl=enabled -Dlibproxy=disabled \
         -Dgnome_proxy=disabled -Dinstalled_tests=false
-    ninja -C "$BLD/gnet" install >>"$LOGS/gnet.log" 2>&1 || true
-    [ -f "$PREFIX/lib/gio/modules/libgioopenssl.so" ] \
+    DESTDIR="$STAGE" ninja -C "$BLD/gnet" install >>"$LOGS/gnet.log" 2>&1 || true
+    [ -f "$SYSDIR/lib64/gio/modules/libgioopenssl.so" ] \
         || die "glib-networking не поставила libgioopenssl.so"
     mark_done gnet
 fi
@@ -588,14 +551,14 @@ fi
 # ==============================================================================
 #  Уборка
 # ==============================================================================
-# Все исполняемые файлы на складе собраны под OpenHarmony и на машине сборки
-# не запускаются. Если оставить их в out/bin, CMake при настройке WebKit
-# выберет оттуда glib-compile-resources вместо системного — и сборка встанет
-# на «not found». Убираем их в сторону; на устройство они поедут отдельно.
-if [ -d "$PREFIX/bin" ] && [ -n "$(ls -A "$PREFIX/bin" 2>/dev/null)" ]; then
-    say "убираю исполняемые файлы из out/bin"
-    mkdir -p "$PREFIX/bin-target"
-    mv "$PREFIX/bin/"* "$PREFIX/bin-target/"
+# Исполняемые файлы на складе собраны под OpenHarmony и на машине сборки не
+# запускаются. Если оставить их в stage/system/bin, CMake при настройке WebKit
+# выберет оттуда glib-compile-resources вместо системного. Убираем в сторону;
+# на устройство их перенесёт deploy отдельно, если понадобятся.
+if [ -d "$SYSDIR/bin" ] && [ -n "$(ls -A "$SYSDIR/bin" 2>/dev/null)" ]; then
+    say "убираю исполняемые файлы из stage/system/bin"
+    mkdir -p "$WPE/stage/bin-target"
+    mv "$SYSDIR/bin/"* "$WPE/stage/bin-target/"
 fi
 
 # ==============================================================================
@@ -607,7 +570,7 @@ echo
 echo "Стандартная библиотека C++ ($CXX18/lib):"
 ls -1 "$CXX18/lib" | sed 's/^/    /'
 echo
-echo "Описания для поиска ($PREFIX/lib/pkgconfig):"
-ls -1 "$PREFIX/lib/pkgconfig" | sed 's/^/    /'
+echo "Описания для поиска ($SYSDIR/lib64/pkgconfig):"
+ls -1 "$SYSDIR/lib64/pkgconfig" | sed 's/^/    /'
 echo
 echo "Дальше: ./wpe.sh engine"
