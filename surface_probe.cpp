@@ -127,10 +127,18 @@ int main(int argc, char** argv)
     }
     std::printf("окно получено\n");
 
+   // if (!SetUpEGL(reinterpret_cast<EGLNativeWindowType>(nativeWindow)))
+   //     return 1;
+
+   // NativeWindowHandleOpt(nativeWindow, SET_BUFFER_GEOMETRY, width, height);
+
+
+    NativeWindowHandleOpt(nativeWindow, SET_BUFFER_GEOMETRY, width, height);
+    NativeWindowHandleOpt(nativeWindow, SET_FORMAT, GRAPHIC_PIXEL_FMT_RGBA_8888);
+
     if (!SetUpEGL(reinterpret_cast<EGLNativeWindowType>(nativeWindow)))
         return 1;
 
-    NativeWindowHandleOpt(nativeWindow, SET_BUFFER_GEOMETRY, width, height);
 
     // Плавно меняем цвет, чтобы было видно, что кадры действительно идут.
     std::printf("рисую %d секунд\n", seconds);
