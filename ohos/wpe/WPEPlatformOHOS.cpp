@@ -10,14 +10,19 @@
  * поверхность приходит от XComponent). Если не дан — заводим окно сами,
  * подгрузив libarkvm_ohos_window.z.so.
  *
- * Номер поверхности в OpenHarmony внутрипроцессный, поэтому принять его от
- * другого процесса нельзя: тот, кто заводит окно, и тот, кто рисует, должны
- * быть одним процессом.
+ * Номер поверхности в OpenHarmony внутрипроцессный: SurfaceUtils хранит их
+ * в обычном списке в памяти процесса. Поэтому принять номер от другого
+ * процесса нельзя — тот, кто заводит окно, и тот, кто рисует, должны быть
+ * одним процессом.
  *
  * Отрисовка устроена просто: WPE отдаёт готовый кадр, мы просим у него
  * картинку для EGL (wpe_buffer_import_to_egl_image — он сам разберётся,
  * лежит ли кадр в dma-buf или в общей памяти), натягиваем её на
  * прямоугольник во всё окно и отдаём кадр системе.
+ *
+ * Виды объявлены отчуждаемыми (G_DEFINE_DYNAMIC_TYPE) и привязаны к самой
+ * части. Иначе GIO выгрузит нас сразу после просмотра каталога, а
+ * зарегистрированные виды будут указывать в освобождённую память.
  *
  * Переменные окружения:
  *   WPE_OHOS_SURFACE_ID  номер поверхности; если не задан, окно заводится само
@@ -68,12 +73,12 @@ struct _WPEDisplayOHOS {
     int height;
     WPEKeymap* keymap;
 };
-G_DEFINE_TYPE(WPEDisplayOHOS, wpe_display_ohos, WPE_TYPE_DISPLAY)
+G_DEFINE_DYNAMIC_TYPE(WPEDisplayOHOS, wpe_display_ohos, WPE_TYPE_DISPLAY)
 
 struct _WPEToplevelOHOS {
     WPEToplevel parent;
 };
-G_DEFINE_TYPE(WPEToplevelOHOS, wpe_toplevel_ohos, WPE_TYPE_TOPLEVEL)
+G_DEFINE_DYNAMIC_TYPE(WPEToplevelOHOS, wpe_toplevel_ohos, WPE_TYPE_TOPLEVEL)
 
 struct _WPEViewOHOS {
     WPEView parent;
@@ -82,10 +87,11 @@ struct _WPEViewOHOS {
     EGLContext eglContext;
     GLuint program;
     GLuint texture;
+    GLint swapLocation;
     gboolean glReady;
     WPEBuffer* committedBuffer;
 };
-G_DEFINE_TYPE(WPEViewOHOS, wpe_view_ohos, WPE_TYPE_VIEW)
+G_DEFINE_DYNAMIC_TYPE(WPEViewOHOS, wpe_view_ohos, WPE_TYPE_VIEW)
 
 // ============================================================================
 //  Мелкая помощь по OpenGL
@@ -100,12 +106,18 @@ static const char* kVertexShader =
     "    v_texCoord = texCoord;\n"
     "}\n";
 
+// swapRB: кадры из общей памяти приходят в порядке ARGB8888, что на
+// машине с обратным порядком байтов означает B, G, R, A. Полотно же
+// читается как R, G, B, A. Поэтому при заливке точек меняем местами
+// первую и третью составляющие; для картинки из dma-buf это не нужно.
 static const char* kFragmentShader =
     "precision mediump float;\n"
     "varying vec2 v_texCoord;\n"
     "uniform sampler2D tex;\n"
+    "uniform float swapRB;\n"
     "void main() {\n"
-    "    gl_FragColor = texture2D(tex, v_texCoord);\n"
+    "    vec4 c = texture2D(tex, v_texCoord);\n"
+    "    gl_FragColor = mix(c, c.bgra, swapRB);\n"
     "}\n";
 
 static GLuint compileShader(GLenum type, const char* source)
@@ -152,12 +164,15 @@ static gboolean createOwnWindow(WPEDisplayOHOS* self, GError** error)
 {
     typedef guint64 (*CreateFn)(int*, int*);
 
+    OHOS_LOG("WPEPlatformOHOS: подгружаю libarkvm_ohos_window.z.so\n");
     void* helper = dlopen("libarkvm_ohos_window.z.so", RTLD_NOW | RTLD_GLOBAL);
     if (!helper) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
             "не удалось подгрузить libarkvm_ohos_window.z.so: %s", dlerror());
         return FALSE;
     }
+
+    OHOS_LOG("WPEPlatformOHOS: подгрузилась, ищу arkvm_window_create\n");
     CreateFn create = (CreateFn)dlsym(helper, "arkvm_window_create");
     if (!create) {
         g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -165,6 +180,7 @@ static gboolean createOwnWindow(WPEDisplayOHOS* self, GError** error)
         return FALSE;
     }
 
+    OHOS_LOG("WPEPlatformOHOS: завожу окно\n");
     int width = 0;
     int height = 0;
     self->surfaceId = create(&width, &height);
@@ -183,6 +199,7 @@ static gboolean createOwnWindow(WPEDisplayOHOS* self, GError** error)
 static gboolean wpeDisplayOHOSConnect(WPEDisplay* display, GError** error)
 {
     WPEDisplayOHOS* self = WPE_DISPLAY_OHOS(display);
+    OHOS_LOG("WPEPlatformOHOS: подключаюсь\n");
 
     const char* widthText = g_getenv("WPE_OHOS_WIDTH");
     const char* heightText = g_getenv("WPE_OHOS_HEIGHT");
@@ -210,8 +227,8 @@ static gboolean wpeDisplayOHOSConnect(WPEDisplay* display, GError** error)
     // иначе слой связи с Vulkan не заведёт ни одного образа для обмена.
     OH_NativeWindow_NativeWindowHandleOpt(self->window, SET_BUFFER_GEOMETRY, self->width, self->height);
 
-    OHOS_LOG("WPEPlatformOHOS: окно %p из поверхности %" G_GUINT64_FORMAT ", %dx%d\n",
-        (void*)self->window, self->surfaceId, self->width, self->height);
+    OHOS_LOG("WPEPlatformOHOS: окно %p готово, %dx%d\n",
+        (void*)self->window, self->width, self->height);
     return TRUE;
 }
 
@@ -247,11 +264,13 @@ static void wpeDisplayOHOSDispose(GObject* object)
 
 static void wpe_display_ohos_init(WPEDisplayOHOS* self)
 {
+    OHOS_LOG("WPEPlatformOHOS: объект площадки создан\n");
     self->eglDisplay = EGL_NO_DISPLAY;
 }
 
 static void wpe_display_ohos_class_init(WPEDisplayOHOSClass* klass)
 {
+    OHOS_LOG("WPEPlatformOHOS: вид площадки описан\n");
     G_OBJECT_CLASS(klass)->dispose = wpeDisplayOHOSDispose;
 
     WPEDisplayClass* displayClass = WPE_DISPLAY_CLASS(klass);
@@ -260,6 +279,11 @@ static void wpe_display_ohos_class_init(WPEDisplayOHOSClass* klass)
     displayClass->create_toplevel = wpeDisplayOHOSCreateToplevel;
     displayClass->get_egl_display = wpeDisplayOHOSGetEGLDisplay;
     displayClass->get_keymap = wpeDisplayOHOSGetKeymap;
+}
+
+// Отчуждаемый вид обязан уметь прибираться, даже если прибирать нечего.
+static void wpe_display_ohos_class_finalize(WPEDisplayOHOSClass*)
+{
 }
 
 // ============================================================================
@@ -282,6 +306,10 @@ static void wpe_toplevel_ohos_init(WPEToplevelOHOS*)
 static void wpe_toplevel_ohos_class_init(WPEToplevelOHOSClass* klass)
 {
     WPE_TOPLEVEL_CLASS(klass)->resize = wpeToplevelOHOSResize;
+}
+
+static void wpe_toplevel_ohos_class_finalize(WPEToplevelOHOSClass*)
+{
 }
 
 // ============================================================================
@@ -368,6 +396,8 @@ static gboolean viewEnsureGL(WPEViewOHOS* self, GError** error)
         return FALSE;
     }
 
+    self->swapLocation = glGetUniformLocation(self->program, "swapRB");
+
     glGenTextures(1, &self->texture);
     glBindTexture(GL_TEXTURE_2D, self->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -389,19 +419,56 @@ static gboolean wpeViewOHOSRenderBuffer(WPEView* view, WPEBuffer* buffer,
     if (!viewEnsureGL(self, error))
         return FALSE;
 
-    // WPE сам разберётся, лежит ли кадр в dma-buf или в общей памяти.
-    EGLImage image = (EGLImage)wpe_buffer_import_to_egl_image(buffer, error);
-    if (!image)
-        return FALSE;
+    const int width = wpe_buffer_get_width(buffer);
+    const int height = wpe_buffer_get_height(buffer);
 
     eglMakeCurrent(display->eglDisplay, self->eglSurface, self->eglSurface, self->eglContext);
-
-    glViewport(0, 0, wpe_buffer_get_width(buffer), wpe_buffer_get_height(buffer));
-
+    // Рисуем во всё окно: кадр может прийти другого размера, тогда он просто
+    // растянется, а не прижмётся в угол. Начало отсчёта в OpenGL — левый
+    // нижний угол, поэтому меньшая область рисования уводит картинку вниз.
+    glViewport(0, 0, display->width, display->height);
     glBindTexture(GL_TEXTURE_2D, self->texture);
-    imageTargetTexture2D(GL_TEXTURE_2D, (GLeglImageOES)image);
+
+    // Два пути. Кадр в dma-buf превращается в картинку для EGL без
+    // переписывания — это даром. Кадр в общей памяти приходится заливать
+    // в полотно; так выходит медленнее, зато работает всегда.
+    float swapRB = 0.0f;
+    GError* imageError = nullptr;
+    EGLImage image = (EGLImage)wpe_buffer_import_to_egl_image(buffer, &imageError);
+    if (image) {
+        imageTargetTexture2D(GL_TEXTURE_2D, (GLeglImageOES)image);
+    } else {
+        g_clear_error(&imageError);
+
+        GBytes* pixels = wpe_buffer_import_to_pixels(buffer, error);
+        if (!pixels)
+            return FALSE;
+
+        gsize size = 0;
+        const guint8* data = (const guint8*)g_bytes_get_data(pixels, &size);
+        guint stride = (guint)width * 4;
+        if (WPE_IS_BUFFER_SHM(buffer))
+            stride = wpe_buffer_shm_get_stride(WPE_BUFFER_SHM(buffer));
+
+        if (stride == (guint)width * 4) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+                GL_RGBA, GL_UNSIGNED_BYTE, data);
+        } else {
+            // Строки лежат с запасом: GLES2 не умеет про это слышать,
+            // поэтому заливаем по одной.
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+                GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            for (int y = 0; y < height; ++y) {
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, width, 1,
+                    GL_RGBA, GL_UNSIGNED_BYTE, data + (gsize)y * stride);
+            }
+        }
+        swapRB = 1.0f;
+    }
 
     glUseProgram(self->program);
+    if (self->swapLocation >= 0)
+        glUniform1f(self->swapLocation, swapRB);
 
     // Прямоугольник во всё окно. Второй набор — положение точки в кадре;
     // по высоте перевёрнут, потому что кадр считается сверху вниз,
@@ -438,14 +505,11 @@ static void viewToplevelChanged(WPEView* view, GParamSpec*, gpointer)
     }
 
     WPEDisplayOHOS* display = WPE_DISPLAY_OHOS(wpe_view_get_display(view));
-    int width = 0;
-    int height = 0;
-    wpe_toplevel_get_size(toplevel, &width, &height);
-    if (!width || !height) {
-        width = display->width;
-        height = display->height;
-        wpe_toplevel_resized(toplevel, width, height);
-    }
+    // Размер задаём мы, а не движок: у него своё умолчание 1024x768,
+    // и кадр приходил бы меньше окна.
+    const int width = display->width;
+    const int height = display->height;
+    wpe_toplevel_resize(toplevel, width, height);
     wpe_view_resized(view, width, height);
     wpe_view_map(view);
     OHOS_LOG("WPEPlatformOHOS: окно показано, %dx%d\n", width, height);
@@ -488,15 +552,26 @@ static void wpe_view_ohos_class_init(WPEViewOHOSClass* klass)
     WPE_VIEW_CLASS(klass)->render_buffer = wpeViewOHOSRenderBuffer;
 }
 
+static void wpe_view_ohos_class_finalize(WPEViewOHOSClass*)
+{
+}
+
 // ============================================================================
 //  Объявление себя
 // ============================================================================
 
 extern "C" {
 
-G_MODULE_EXPORT void g_io_module_load(GIOModule*)
+G_MODULE_EXPORT void g_io_module_load(GIOModule* module)
 {
-    g_type_ensure(wpe_display_ohos_get_type());
+    // Привязка видов к самой части обязательна: иначе GIO выгрузит нас сразу
+    // после просмотра каталога, а зарегистрированные виды будут указывать
+    // в освобождённую память — и первое же создание объекта площадки
+    // кончится падением.
+    wpe_display_ohos_register_type(G_TYPE_MODULE(module));
+    wpe_toplevel_ohos_register_type(G_TYPE_MODULE(module));
+    wpe_view_ohos_register_type(G_TYPE_MODULE(module));
+
     g_io_extension_point_implement(WPE_DISPLAY_EXTENSION_POINT_NAME,
         wpe_display_ohos_get_type(), "ohos", 0);
     OHOS_LOG("WPEPlatformOHOS: площадка объявлена\n");
