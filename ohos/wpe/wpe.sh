@@ -6,6 +6,7 @@
 #   ./wpe.sh image      — только пересобрать образ
 #   ./wpe.sh deps       — только зависимости
 #   ./wpe.sh engine     — только движок
+#   ./wpe.sh platform   — площадка вывода для OpenHarmony
 #   ./wpe.sh deploy     — перенести собранное в настоящий /system (нужен sudo)
 #
 # Всё собирается так, будто будет жить в /system, но кладётся в stage/root.
@@ -37,6 +38,7 @@ case "${1:-shell}" in
     shell)  build_image; run bash ;;
     deps)   run bash "$WPE_DIR/build-deps.sh" ;;
     engine) run bash "$WPE_DIR/build-engine.sh" ;;
+    platform) run bash "$WPE_DIR/build-platform.sh" ;;
     deploy) sh "$WPE_DIR/deploy.sh" ;;
     build)  build_image
             run bash "$WPE_DIR/build-deps.sh"
