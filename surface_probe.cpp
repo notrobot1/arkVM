@@ -1,15 +1,19 @@
 /*
- * Проба пути к экрану: окно без приложения.
+ * Окно без приложения.
  *
  * Создаёт у службы отрисовки самостоятельный узел поверхности, цепляет его
- * к изображению, достаёт из него оконный указатель и закрашивает цветом
- * через EGL. Ровно та последовательность, которой пользуется образец
- * drawing_sample_replayer.
- *
- * Если прямоугольник появится, значит обозреватель сможет жить обычным
- * процессом со своим окном — без ArkTS, без XComponent и без подписи.
+ * к изображению и достаёт оконный указатель. Дальше — два занятия на выбор:
  *
  *   arkvm_surface_probe [секунд]
+ *       закрашивает окно переливающимся цветом через EGL. Проверка того,
+ *       что путь к экрану вообще работает.
+ *
+ *   arkvm_surface_probe hold
+ *       только создаёт окно, называет его номер и держит. Рисовать будет
+ *       кто-то другой — например, обозреватель, которому этот номер
+ *       передадут через переменную WPE_OHOS_SURFACE_ID.
+ *
+ * Последовательность взята у образца drawing_sample_replayer.
  */
 
 #include <chrono>
@@ -87,7 +91,11 @@ bool SetUpEGL(EGLNativeWindowType window)
 
 int main(int argc, char** argv)
 {
-    int seconds = argc > 1 ? std::stoi(argv[1]) : 10;
+    // ИЗМЕНЕНО: довод может быть словом «hold», поэтому читаем число
+    // только когда это действительно число.
+    const std::string mode = argc > 1 ? argv[1] : "";
+    const bool holdOnly = (mode == "hold");
+    const int seconds = (!mode.empty() && !holdOnly) ? std::stoi(mode) : 10;
 
     auto defaultDisplay = DisplayManager::GetInstance().GetDefaultDisplay();
     if (!defaultDisplay) {
@@ -120,6 +128,22 @@ int main(int argc, char** argv)
         std::printf("у узла нет поверхности\n");
         return 1;
     }
+
+    // ДОБАВЛЕНО: номер поверхности. По нему другой процесс сможет получить
+    // то же самое окно вызовом OH_NativeWindow_CreateNativeWindowFromSurfaceId.
+    std::printf("номер поверхности: %llu\n",
+        static_cast<unsigned long long>(ohosSurface->GetUniqueId()));
+    std::fflush(stdout);
+
+    // ДОБАВЛЕНО: режим «подержать». Окно создано и живо, рисует кто-то другой.
+    // Узел поверхности существует, пока жив этот процесс, поэтому просто ждём.
+    if (holdOnly) {
+        std::printf("держу окно, прервите по Ctrl+C\n");
+        std::fflush(stdout);
+        for (;;)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
     OHNativeWindow* nativeWindow = CreateNativeWindowFromSurface(&ohosSurface);
     if (nativeWindow == nullptr) {
         std::printf("окно из поверхности не получилось\n");
@@ -127,18 +151,12 @@ int main(int argc, char** argv)
     }
     std::printf("окно получено\n");
 
-   // if (!SetUpEGL(reinterpret_cast<EGLNativeWindowType>(nativeWindow)))
-   //     return 1;
-
-   // NativeWindowHandleOpt(nativeWindow, SET_BUFFER_GEOMETRY, width, height);
-
-
+    // Размер буфера задаётся ДО того, как у окна просят поверхность EGL:
+    // иначе слой связи с Vulkan не заведёт ни одного образа для обмена.
     NativeWindowHandleOpt(nativeWindow, SET_BUFFER_GEOMETRY, width, height);
-    NativeWindowHandleOpt(nativeWindow, SET_FORMAT, GRAPHIC_PIXEL_FMT_RGBA_8888);
 
     if (!SetUpEGL(reinterpret_cast<EGLNativeWindowType>(nativeWindow)))
         return 1;
-
 
     // Плавно меняем цвет, чтобы было видно, что кадры действительно идут.
     std::printf("рисую %d секунд\n", seconds);
