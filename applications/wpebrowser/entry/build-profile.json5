@@ -1,0 +1,17 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "",
+      "cppFlags": "",
+      "abiFilters": ["x86_64"]
+    }
+  },
+  "targets": [
+    {
+      "name": "default",
+      "runtimeOS": "OpenHarmony"
+    }
+  ]
+}
