@@ -5,10 +5,14 @@
  * выбирается переменной окружения WPE_PLATFORM=ohos. Исходники WebKit при
  * этом не меняются вовсе — площадки ищутся по каталогу.
  *
- * Окно площадка получает не сама, а по номеру поверхности, который ей даёт
- * хозяин через WPE_OHOS_SURFACE_ID. Так она одинаково работает и под
- * самостоятельным слоем, и под окном оконного распорядителя, и под
- * XComponent в приложении.
+ * Окно берётся одним из двух способов. Если дан номер поверхности в
+ * WPE_OHOS_SURFACE_ID — берём его (так будет в приложении на ArkTS, где
+ * поверхность приходит от XComponent). Если не дан — заводим окно сами,
+ * подгрузив libarkvm_ohos_window.z.so.
+ *
+ * Номер поверхности в OpenHarmony внутрипроцессный, поэтому принять его от
+ * другого процесса нельзя: тот, кто заводит окно, и тот, кто рисует, должны
+ * быть одним процессом.
  *
  * Отрисовка устроена просто: WPE отдаёт готовый кадр, мы просим у него
  * картинку для EGL (wpe_buffer_import_to_egl_image — он сам разберётся,
@@ -16,7 +20,7 @@
  * прямоугольник во всё окно и отдаём кадр системе.
  *
  * Переменные окружения:
- *   WPE_OHOS_SURFACE_ID  номер поверхности (обязательно)
+ *   WPE_OHOS_SURFACE_ID  номер поверхности; если не задан, окно заводится само
  *   WPE_OHOS_WIDTH       ширина окна, по умолчанию 1920
  *   WPE_OHOS_HEIGHT      высота окна, по умолчанию 1080
  *   WPE_OHOS_DEBUG       если задана — говорить о каждом шаге
@@ -34,6 +38,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <dlfcn.h>
 
 #define OHOS_LOG(...) do { if (g_getenv("WPE_OHOS_DEBUG")) g_printerr(__VA_ARGS__); } while (0)
 
@@ -140,22 +145,59 @@ static gpointer wpeDisplayOHOSGetEGLDisplay(WPEDisplay* display, GError** error)
     return eglDisplay;
 }
 
+// Заводим окно сами, через вспомогательную библиотеку из дерева OpenHarmony.
+// Прямо отсюда к службе отрисовки не дотянуться: площадка собирается лишь
+// по пакету для разработчиков. Подгружаем по имени.
+static gboolean createOwnWindow(WPEDisplayOHOS* self, GError** error)
+{
+    typedef guint64 (*CreateFn)(int*, int*);
+
+    void* helper = dlopen("libarkvm_ohos_window.z.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!helper) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "не удалось подгрузить libarkvm_ohos_window.z.so: %s", dlerror());
+        return FALSE;
+    }
+    CreateFn create = (CreateFn)dlsym(helper, "arkvm_window_create");
+    if (!create) {
+        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "в libarkvm_ohos_window.z.so нет arkvm_window_create");
+        return FALSE;
+    }
+
+    int width = 0;
+    int height = 0;
+    self->surfaceId = create(&width, &height);
+    if (!self->surfaceId) {
+        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "окно не завелось: служба отрисовки не отвечает?");
+        return FALSE;
+    }
+    self->width = width;
+    self->height = height;
+    OHOS_LOG("WPEPlatformOHOS: завёл своё окно, поверхность %" G_GUINT64_FORMAT ", %dx%d\n",
+        self->surfaceId, width, height);
+    return TRUE;
+}
+
 static gboolean wpeDisplayOHOSConnect(WPEDisplay* display, GError** error)
 {
     WPEDisplayOHOS* self = WPE_DISPLAY_OHOS(display);
-
-    const char* idText = g_getenv("WPE_OHOS_SURFACE_ID");
-    if (!idText || !*idText) {
-        g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-            "не задан номер поверхности: нужна переменная WPE_OHOS_SURFACE_ID");
-        return FALSE;
-    }
-    self->surfaceId = g_ascii_strtoull(idText, nullptr, 10);
 
     const char* widthText = g_getenv("WPE_OHOS_WIDTH");
     const char* heightText = g_getenv("WPE_OHOS_HEIGHT");
     self->width = widthText ? atoi(widthText) : 1920;
     self->height = heightText ? atoi(heightText) : 1080;
+
+    // Если номер поверхности дали снаружи — берём его. Так будет в приложении
+    // на ArkTS: там поверхность приходит от XComponent, и она в том же
+    // процессе. Если не дали — заводим окно сами.
+    const char* idText = g_getenv("WPE_OHOS_SURFACE_ID");
+    if (idText && *idText) {
+        self->surfaceId = g_ascii_strtoull(idText, nullptr, 10);
+        OHOS_LOG("WPEPlatformOHOS: мне дали поверхность %" G_GUINT64_FORMAT "\n", self->surfaceId);
+    } else if (!createOwnWindow(self, error))
+        return FALSE;
 
     int ret = OH_NativeWindow_CreateNativeWindowFromSurfaceId(self->surfaceId, &self->window);
     if (ret != 0 || !self->window) {
