@@ -1,16 +1,22 @@
 /*
- * Проба WPE WebKit под OpenHarmony: безэкранная площадка.
+ * Проба WPE WebKit под OpenHarmony.
  *
- * Создаёт площадку без вывода на экран, загружает в неё страницу и печатает
- * заголовок. Если это работает, значит живы: сам движок, отдельный процесс
- * отрисовки, межпроцессное взаимодействие, разбор разметки, шрифты и —
- * если дать ссылку в сеть — обмен по сети с защищёнными соединениями.
+ * Создаёт окно, загружает в него страницу и печатает заголовок. Если это
+ * работает, значит живы: сам движок, отдельный процесс отрисовки,
+ * межпроцессное взаимодействие, разбор разметки, шрифты и — если дать
+ * ссылку в сеть — обмен по сети с защищёнными соединениями.
+ *
+ * Площадку выбирает переменная окружения WPE_PLATFORM:
+ *
+ *   WPE_PLATFORM=headless            рисовать в память, ничего не показывая;
+ *   WPE_PLATFORM=ohos                рисовать в окно OpenHarmony. Тогда нужен
+ *   WPE_OHOS_SURFACE_ID=<номер>      номер поверхности от хозяина окна
+ *                                    (его называет arkvm_surface_probe hold).
  *
  * Сборка и запуск — см. smoke.sh
  */
 
 #include <wpe/webkit.h>
-#include <wpe/headless/wpe-headless.h>
 
 static GMainLoop* loop = NULL;
 static int exitCode = 1;
@@ -32,7 +38,10 @@ static void onLoadChanged(WebKitWebView* view, WebKitLoadEvent event, gpointer)
         g_print("\nссылка:   %s\n", uri ? uri : "(нет)");
         g_print("заголовок: %s\n", title ? title : "(нет)");
         exitCode = 0;
-        g_main_loop_quit(loop);
+        /* При выводе на экран выходить сразу незачем — пусть страница
+           повисит, чтобы на неё можно было посмотреть. */
+        if (!g_getenv("WPE_OHOS_SURFACE_ID"))
+            g_main_loop_quit(loop);
         break;
     }
     default:
@@ -47,7 +56,8 @@ static void onLoadFailed(WebKitWebView*, WebKitLoadEvent, const char* uri, GErro
 }
 
 /* Страховка: если за десять секунд ничего не произошло — выходим,
-   иначе при неполадке программа повиснет навсегда. */
+   иначе при неполадке программа повиснет навсегда. Когда рисуем на экран,
+   страховка не нужна: там мы висим нарочно. */
 static gboolean onTimeout(gpointer)
 {
     g_printerr("\nвремя вышло: движок не доложил о завершении\n");
@@ -59,16 +69,13 @@ int main(int argc, char** argv)
 {
     const char* target = argc > 1 ? argv[1] : NULL;
 
-    g_print("создаю безэкранную площадку...\n");
-    WPEDisplay* display = wpe_display_headless_new();
+    /* ИЗМЕНЕНО: раньше площадка задавалась прямо в коде (безэкранная).
+       Теперь берём ту, что выбрана переменной WPE_PLATFORM: так одна и та же
+       проба годится и для отрисовки в память, и для вывода на экран. */
+    g_print("беру площадку %s\n", g_getenv("WPE_PLATFORM") ?: "(по умолчанию)");
+    WPEDisplay* display = wpe_display_get_primary();
     if (!display) {
-        g_printerr("площадка не создалась\n");
-        return 1;
-    }
-
-    GError* error = NULL;
-    if (!wpe_display_connect(display, &error)) {
-        g_printerr("площадка не подключилась: %s\n", error->message);
+        g_printerr("площадка не нашлась\n");
         return 1;
     }
     g_print("площадка готова: %s\n", G_OBJECT_TYPE_NAME(display));
@@ -84,7 +91,8 @@ int main(int argc, char** argv)
     loop = g_main_loop_new(NULL, FALSE);
     g_signal_connect(view, "load-changed", G_CALLBACK(onLoadChanged), NULL);
     g_signal_connect(view, "load-failed", G_CALLBACK(onLoadFailed), NULL);
-    g_timeout_add_seconds(10, onTimeout, NULL);
+    if (!g_getenv("WPE_OHOS_SURFACE_ID"))
+        g_timeout_add_seconds(10, onTimeout, NULL);
 
     if (target) {
         g_print("загружаю %s\n", target);
@@ -93,8 +101,10 @@ int main(int argc, char** argv)
         g_print("загружаю страницу из памяти\n");
         webkit_web_view_load_html(view,
             "<!DOCTYPE html><html><head><title>Проба пройдена</title></head>"
-            "<body><h1>Привет из WPE WebKit</h1>"
-            "<script>document.title = 'Проба пройдена, JavaScript работает';</script>"
+            "<body style='background:#204080;color:#fff;font-size:64px;"
+            "font-family:sans-serif;padding:40px'>"
+            "<h1>Привет из WPE WebKit</h1>"
+            "<p>OpenHarmony, вывод на экран</p>"
             "</body></html>", NULL);
     }
 
