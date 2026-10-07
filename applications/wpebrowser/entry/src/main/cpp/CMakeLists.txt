@@ -12,14 +12,16 @@ set(NATIVERENDER_ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Промежуточный корень, куда собран движок и всё его окружение.
 # На устройстве те же библиотеки лежат в /system/lib64.
-set(WPE_ROOT /mnt/ohos/wpe/stage/root/system)
+set(WPE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../wpe-sdk)
 
 include_directories(
     ${NATIVERENDER_ROOT_PATH}
     ${NATIVERENDER_ROOT_PATH}/include
+    ${WPE_ROOT}/include
     ${WPE_ROOT}/include/wpe-webkit-2.0
     ${WPE_ROOT}/include/wpe-webkit-2.0/wpe-platform
     ${WPE_ROOT}/include/glib-2.0
+    ${WPE_ROOT}/include/libsoup-3.0
     ${WPE_ROOT}/lib64/glib-2.0/include
 )
 
@@ -31,7 +33,13 @@ target_link_libraries(wpe PUBLIC
     libnative_window.so         # номер поверхности у окна
     libhilog_ndk.z.so           # записи в общий журнал
 
-    ${WPE_ROOT}/lib64/libWPEWebKit-2.0.so
-    ${WPE_ROOT}/lib64/libglib-2.0.so
-    ${WPE_ROOT}/lib64/libgobject-2.0.so
+)
+
+# А движок и его окружение живут в /system/lib64 и в пакет не идут.
+# Передаём их прямыми доводами, иначе hvigor попытается их упаковать.
+target_link_options(wpe PRIVATE
+    -L${WPE_ROOT}/lib64
+    -lWPEWebKit-2.0
+    -lglib-2.0
+    -lgobject-2.0
 )
