@@ -621,7 +621,7 @@ group("all") {
 
     ":arkvm_netsys_setdns($_tc)",
     ":arkvm_ohos_window($_tc)",
-    
+    "//foundation/arkui/ace_engine/interfaces/native:ace_ndk",    
 
 
 ]
