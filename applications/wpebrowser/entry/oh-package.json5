@@ -1,0 +1,9 @@
+{
+  "license": "ISC",
+  "devDependencies": {},
+  "name": "entry",
+  "description": "Обозреватель на WPE WebKit",
+  "version": "1.0.0",
+  "dependencies": {},
+  "dynamicDependencies": {}
+}
