@@ -8,18 +8,64 @@
  *
  * Площадку выбирает переменная окружения WPE_PLATFORM:
  *
- *   WPE_PLATFORM=headless            рисовать в память, ничего не показывая;
- *   WPE_PLATFORM=ohos                рисовать в окно OpenHarmony. Тогда нужен
- *   WPE_OHOS_SURFACE_ID=<номер>      номер поверхности от хозяина окна
- *                                    (его называет arkvm_surface_probe hold).
+ *   WPE_PLATFORM=headless   рисовать в память, ничего не показывая;
+ *   WPE_PLATFORM=ohos       рисовать в окно OpenHarmony.
+ *
+ * Во втором случае окно заводит сама проба, подгрузив вспомогательную
+ * библиотеку из дерева OpenHarmony, и передаёт площадке номер поверхности.
+ * Так и должно быть: номер внутрипроцессный, и заводить окно обязан тот,
+ * кто в нём живёт. В приложении на ArkTS это будет делать его родная часть.
  *
  * Сборка и запуск — см. smoke.sh
  */
 
 #include <wpe/webkit.h>
 
+#include <dlfcn.h>
+#include <stdlib.h>
+
 static GMainLoop* loop = NULL;
 static int exitCode = 1;
+
+/*
+ * Завести окно во весь экран и сказать площадке его номер.
+ * Площадка прочтёт эти переменные при подключении.
+ */
+static gboolean prepareWindow(void)
+{
+    typedef guint64 (*CreateFn)(int*, int*);
+
+    void* helper = dlopen("libarkvm_ohos_window.z.so", RTLD_NOW);
+    if (!helper) {
+        g_printerr("не удалось подгрузить libarkvm_ohos_window.z.so: %s\n", dlerror());
+        return FALSE;
+    }
+    CreateFn create = (CreateFn)dlsym(helper, "arkvm_window_create");
+    if (!create) {
+        g_printerr("в libarkvm_ohos_window.z.so нет arkvm_window_create\n");
+        return FALSE;
+    }
+
+    int width = 0;
+    int height = 0;
+    guint64 surfaceId = create(&width, &height);
+    if (!surfaceId) {
+        g_printerr("окно не завелось: служба отрисовки не отвечает?\n");
+        return FALSE;
+    }
+
+    char buffer[32];
+    g_snprintf(buffer, sizeof(buffer), "%" G_GUINT64_FORMAT, surfaceId);
+    g_setenv("WPE_OHOS_SURFACE_ID", buffer, TRUE);
+    g_snprintf(buffer, sizeof(buffer), "%d", width);
+    g_setenv("WPE_OHOS_WIDTH", buffer, TRUE);
+    g_snprintf(buffer, sizeof(buffer), "%d", height);
+    g_setenv("WPE_OHOS_HEIGHT", buffer, TRUE);
+
+    g_print("окно заведено: поверхность %" G_GUINT64_FORMAT ", %dx%d\n",
+        surfaceId, width, height);
+    return TRUE;
+}
 
 /* Движок сообщает о ходе загрузки через этот сигнал. */
 static void onLoadChanged(WebKitWebView* view, WebKitLoadEvent event, gpointer)
@@ -55,9 +101,8 @@ static void onLoadFailed(WebKitWebView*, WebKitLoadEvent, const char* uri, GErro
     g_main_loop_quit(loop);
 }
 
-/* Страховка: если за десять секунд ничего не произошло — выходим,
-   иначе при неполадке программа повиснет навсегда. Когда рисуем на экран,
-   страховка не нужна: там мы висим нарочно. */
+/* Страховка на случай, если движок вообще не отзовётся. Когда рисуем
+   на экран, она не нужна: там мы висим нарочно. */
 static gboolean onTimeout(gpointer)
 {
     g_printerr("\nвремя вышло: движок не доложил о завершении\n");
@@ -68,12 +113,17 @@ static gboolean onTimeout(gpointer)
 int main(int argc, char** argv)
 {
     const char* target = argc > 1 ? argv[1] : NULL;
+    const char* platform = g_getenv("WPE_PLATFORM");
 
-    /* ИЗМЕНЕНО: раньше площадка задавалась прямо в коде (безэкранная).
-       Теперь берём ту, что выбрана переменной WPE_PLATFORM: так одна и та же
-       проба годится и для отрисовки в память, и для вывода на экран. */
-    g_print("беру площадку %s\n", g_getenv("WPE_PLATFORM") ?: "(по умолчанию)");
-    WPEDisplay* display = wpe_display_get_primary();
+    /* Для вывода на экран сперва заводим окно, потом берём площадку:
+       она прочтёт номер поверхности при подключении. */
+    if (platform && !g_strcmp0(platform, "ohos")) {
+        if (!prepareWindow())
+            return 1;
+    }
+
+    g_print("беру площадку %s\n", platform ? platform : "(по умолчанию)");
+    WPEDisplay* display = wpe_display_get_default();
     if (!display) {
         g_printerr("площадка не нашлась\n");
         return 1;
@@ -86,6 +136,20 @@ int main(int argc, char** argv)
     if (!view) {
         g_printerr("окно не создалось\n");
         return 1;
+    }
+
+    /* Движок не рисует, пока окно не объявлено видимым, и берёт размер
+       у верхнего уровня, а не у площадки. Скажем и то, и другое. */
+    WPEView* wpeView = webkit_web_view_get_wpe_view(view);
+    if (wpeView) {
+        WPEToplevel* toplevel = wpe_view_get_toplevel(wpeView);
+        if (toplevel) {
+            const char* w = g_getenv("WPE_OHOS_WIDTH");
+            const char* h = g_getenv("WPE_OHOS_HEIGHT");
+            wpe_toplevel_resize(toplevel, w ? atoi(w) : 1920, h ? atoi(h) : 1080);
+        }
+        wpe_view_set_visible(wpeView, TRUE);
+        g_print("окно объявлено видимым\n");
     }
 
     loop = g_main_loop_new(NULL, FALSE);
