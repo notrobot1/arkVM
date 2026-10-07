@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Обозреватель на WPE WebKit"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Обозреватель"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Обозреватель"
+    }
+  ]
+}
