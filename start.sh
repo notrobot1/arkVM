@@ -43,7 +43,52 @@ UID_DDATA=3012        # служба распределённых данных
 
 
 
+# Часть ArkUI для XComponent. В этой сборке продукта её не кладут в образ —
+# есть только заглушка из набора для разработчиков, а настоящая библиотека
+# остаётся в каталоге сборки. Берём её оттуда.
+install_ace_ndk() {
+    src="$SCRIPT_DIR/../out/arkvm/arkui/ace_engine/libace_ndk.z.so"
+    [ -f "$src" ] || { echo "нет $src — соберите цель ace_ndk"; return 1; }
+    install -Dm644 "$src" /system/lib64/platformsdk/libace_ndk.z.so
+    ln -sfn /system/lib64/platformsdk/libace_ndk.z.so /system/lib64/ndk/libace_ndk.z.so
+}
 
+# Приложения ищут библиотеки не во всём /system/lib64, а только в путях
+# пространства имён "ndk". Наш набор (движок, glib, ICU и прочее) лежит в
+# /system/lib64 и потому приложению не виден.
+#
+# Заводим отдельный каталог со ссылками на наше и дописываем его в список
+# путей. Системные каталоги при этом не затрагиваются, и всё отменяется
+# удалением одного каталога и одной приписки.
+#
+# Оговорка: файл настроек общий, так что путь открывается всем приложениям,
+# а не только нашему. Пока поднимаем — так и надо; сузить можно позже,
+# отдельным пространством имён и загрузкой через dlopen_ns.
+install_wpe_namespace() {
+    wpe_libs="$SCRIPT_DIR/../../wpe/stage/root/system/lib64"
+
+    mkdir -p /system/lib64/wpe
+
+    # ссылки на всё, что мы ставим сами
+    if [ -d "$wpe_libs" ]; then
+        for f in "$wpe_libs"/*.so*; do
+            [ -e "$f" ] || continue
+            n=$(basename "$f")
+            ln -sfn "/system/lib64/$n" "/system/lib64/wpe/$n"
+        done
+    fi
+    # эти приходят не из stage, а из своей сборки libc++ 18
+    for n in libc++.so.1 libc++abi.so.1 libunwind.so.1; do
+        [ -e "/system/lib64/$n" ] && ln -sfn "/system/lib64/$n" "/system/lib64/wpe/$n"
+    done
+
+    # приписка к путям поиска — в обоих разделах обоих файлов настроек
+    for ini in /system/etc/ld-musl-namespace-x86_64.ini /etc/ld-musl-namespace-x86_64.ini; do
+        [ -f "$ini" ] || continue
+        grep -q '/system/lib64/wpe' "$ini" && continue
+        sed -i 's|^\([[:space:]]*namespace\.ndk\.lib\.paths[[:space:]]*=.*\)$|\1:/system/lib64/wpe|' "$ini"
+    done
+}
 
 
 
@@ -273,6 +318,11 @@ ensure_dirs() {
     mkdir -p /storage/cloud/100/files/.thumbs/Photo
 
 mkdir -p /data/service/el1/public/netsysnative
+
+install_ace_ndk
+install_wpe_namespace
+
+
 }
 
 
@@ -354,9 +404,9 @@ install_netmanager() {
     # Служба 1158 живёт в своём процессе netsysnative,
     # служба 1151 — в процессе netmanager.
     install -Dm644 "$TREE/foundation/communication/netmanager_base/sa_profile/1158.json" \
-        "$SYSTEM/profile/netsysnative.json"
+        "/system/profile/netsysnative.json"
     install -Dm644 "$TREE/foundation/communication/netmanager_base/sa_profile/1151.json" \
-        "$SYSTEM/profile/netmanager.json"
+        "/system/profile/netmanager.json"
 }
 
 
@@ -984,6 +1034,18 @@ EOF
     # зовётся photoaccesshelpernative и даёт другое имя — связываем.
     ln -sf libphotoaccesshelpernative.z.so "$LIB/module/file/libphotoaccesshelper.z.so"
 
+
+
+    install_netmanager
+
+
+
+
+# Родная сторона ArkUI: через неё XComponent отдаёт окно и прикосновения
+    # родному коду приложения. Кладём туда же, где лежит libace_napi.z.so —
+    # этот каталог виден приложениям, а просто /system/lib64 им закрыт.
+    install -Dm644 "$SCRIPT_DIR/../out/arkvm/arkui/ace_engine/libace_ndk.z.so" \
+        /system/lib64/platformsdk/libace_ndk.z.so
 
 
 
