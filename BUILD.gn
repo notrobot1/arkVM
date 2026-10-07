@@ -8,6 +8,48 @@ _tc = "//build/toolchain/ohos:ohos_clang_x86_64"
 
 
 
+
+
+ohos_executable("arkvm_netsys_setdns") {
+  sources = [ "netsys_setdns.cpp" ]
+
+  include_dirs = [
+    "//foundation/communication/netmanager_base/interfaces/innerkits/netmanagernative/include",
+    "//foundation/communication/netmanager_base/interfaces/innerkits/netconnclient/include",
+    "//foundation/communication/netmanager_base/services/netmanagernative/include",
+    "//foundation/communication/netmanager_base/utils/common_utils/include",
+  ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "netmanager_base:netsys_controller",
+  ]
+  install_enable = false
+  part_name = "netmanager_ext"
+  subsystem_name = "communication"
+}
+
+
+ohos_executable("arkvm_surface_probe") {
+  sources = [ "surface_probe.cpp" ]
+    external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "graphic_2d:librender_service_client",
+    "graphic_2d:librender_service_base",
+    "graphic_2d:EGL",
+    "graphic_2d:GLESv3",
+    "graphic_surface:surface",
+    "window_manager:libdm",
+  ]
+  install_enable = false
+    part_name = "ace_engine"
+  subsystem_name = "arkui"
+}
+
+
 ohos_executable("display_probe") {
   sources = [ "display_probe.cpp" ]
   external_deps = [
@@ -23,6 +65,25 @@ subsystem_name = "hdf"
   part_name = "drivers_peripheral_display"
 
 }
+
+
+
+ohos_shared_library("arkvm_ohos_window") {
+  sources = [ "ohos_window.cpp" ]
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_single",
+    "graphic_2d:librender_service_client",
+    "graphic_2d:librender_service_base",
+    "graphic_surface:surface",
+    "window_manager:libdm",
+  ]
+  install_enable = false
+  part_name = "ace_engine"
+  subsystem_name = "arkui"
+}
+
 
 ohos_executable("display_paint") {
   sources = [ "display_paint.cpp" ]
@@ -558,8 +619,9 @@ group("all") {
     "//foundation/communication/netmanager_base/services/netconnmanager:net_conn_manager",
     "//foundation/communication/netmanager_base/services/netsyscontroller:netsys_controller",
 
-
-
+    ":arkvm_netsys_setdns($_tc)",
+    ":arkvm_ohos_window($_tc)",
+    
 
 
 ]
