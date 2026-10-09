@@ -61,6 +61,7 @@ V_FREETYPE=2.13.2
 V_FONTCONFIG=2.15.0
 V_HARFBUZZ=8.5.0
 V_ICU=74.2
+V_GST=1.24.12             # ДОБАВЛЕНО: ядро и базовый набор GStreamer
 
 JOBS=$(nproc)
 
@@ -564,6 +565,50 @@ if ! done_already gnet; then
         || die "glib-networking не поставила libgioopenssl.so"
     mark_done gnet
 fi
+
+# ==============================================================================
+#  Шаг 11. GStreamer — ради видео в движке               [ДОБАВЛЕНО]
+# ==============================================================================
+# Зачем. Без видео в разметке нет HTMLVideoElement, и страницы, которые на
+# него рассчитывают, останавливаются на полпути. YouTube — ровно такой
+# случай: он показывал один остов и ронял выполнение с
+#     ReferenceError: Can't find variable: HTMLVideoElement
+#
+# Что именно нужно. Движку обязательны четыре части, и все они из
+# gst-plugins-base: app, pbutils, tag, video (см. в исходниках WebKit
+# Source/cmake/GStreamerChecks.cmake). Там же ищутся gl, mpegts и webrtc, но
+# они требуются лишь при явном включении — мы их не включаем, потому что они
+# тянут за собой оконную подсистему и обмен по сети, которых у нас нет.
+#
+# Чего это НЕ даёт. Воспроизведения. Для показа видео понадобятся ещё наборы
+# разборщиков и расшифровщиков — gst-plugins-good, gst-plugins-bad,
+# gst-libav. Это отдельный шаг, и браться за него стоит, уже видя, какого
+# именно разборщика не хватает.
+#
+# Про размещение. Дополнения GStreamer ищет в <prefix>/lib64/gstreamer-1.0,
+# то есть на устройстве в /system/lib64/gstreamer-1.0 — путь вшивается при
+# сборке и оказывается верным сам собой, как и у остальных наших библиотек.
+
+fetch "gstreamer-$V_GST" "gstreamer-$V_GST.tar.xz" \
+    "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-$V_GST.tar.xz"
+meson_build gstreamer "gstreamer-$V_GST" \
+    -Dexamples=disabled -Dtests=disabled -Dbenchmarks=disabled \
+    -Dtools=disabled -Dintrospection=disabled -Ddoc=disabled \
+    -Dptp-helper=disabled -Dlibunwind=disabled -Dlibdw=disabled \
+    -Ddbghelp=disabled -Dbash-completion=disabled \
+    -Dgobject-cast-checks=disabled -Dglib-asserts=disabled -Dglib-checks=disabled
+
+# Всё внешнее отключено намеренно: нам нужны только библиотеки
+# (app, pbutils, tag, video), а не дополнения для звука и вывода.
+fetch "gst-plugins-base-$V_GST" "gst-plugins-base-$V_GST.tar.xz" \
+    "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-$V_GST.tar.xz"
+meson_build gst-plugins-base "gst-plugins-base-$V_GST" \
+    -Dexamples=disabled -Dtests=disabled -Dintrospection=disabled -Ddoc=disabled \
+    -Dorc=disabled -Dgl=disabled -Dx11=disabled -Dxvideo=disabled \
+    -Dwayland=disabled -Dalsa=disabled -Dcdparanoia=disabled \
+    -Dlibvisual=disabled -Dtremor=disabled -Dvorbis=disabled \
+    -Dtheora=disabled -Dogg=disabled -Dopus=disabled -Dpango=disabled \
+    -Dgobject-cast-checks=disabled -Dglib-asserts=disabled -Dglib-checks=disabled
 
 # ==============================================================================
 #  Уборка
