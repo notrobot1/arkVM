@@ -138,6 +138,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
+
+  /* Жалобы страницы — в обычный вывод. Без этого пустая страница
+       выглядит просто пустой, без объяснений. */
+    WebKitSettings* settings = webkit_web_view_get_settings(view);
+    webkit_settings_set_enable_write_console_messages_to_stdout(settings, TRUE);
+
+
     /* Движок не рисует, пока окно не объявлено видимым, и берёт размер
        у верхнего уровня, а не у площадки. Скажем и то, и другое. */
     WPEView* wpeView = webkit_web_view_get_wpe_view(view);
