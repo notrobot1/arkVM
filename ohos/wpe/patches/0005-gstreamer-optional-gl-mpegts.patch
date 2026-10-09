@@ -12,7 +12,7 @@ gst-plugins-bad ради одной библиотеки. Приводим пе�
 
 --- a/Source/cmake/GStreamerChecks.cmake
 +++ b/Source/cmake/GStreamerChecks.cmake
-@@ -9,8 +9,17 @@
+@@ -9,7 +9,15 @@
        else ()
            set(GSTREAMER_COMPONENTS app pbutils)
            if (ENABLE_VIDEO)
@@ -27,6 +27,5 @@ gst-plugins-bad ради одной библиотеки. Приводим пе�
 +                  list(APPEND GSTREAMER_COMPONENTS gl)
 +              endif ()
            endif ()
-
+ 
            if (ENABLE_WEB_AUDIO)
-               list(APPEND GSTREAMER_COMPONENTS audio fft)
