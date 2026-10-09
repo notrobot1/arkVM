@@ -605,7 +605,7 @@ fetch "gst-plugins-base-$V_GST" "gst-plugins-base-$V_GST.tar.xz" \
 meson_build gst-plugins-base "gst-plugins-base-$V_GST" \
     -Dexamples=disabled -Dtests=disabled -Dintrospection=disabled -Ddoc=disabled \
     -Dorc=disabled -Dgl=disabled -Dx11=disabled -Dxvideo=disabled \
-    -Dwayland=disabled -Dalsa=disabled -Dcdparanoia=disabled \
+    -Dalsa=disabled -Dcdparanoia=disabled \
     -Dlibvisual=disabled -Dtremor=disabled -Dvorbis=disabled \
     -Dtheora=disabled -Dogg=disabled -Dopus=disabled -Dpango=disabled \
     -Dgobject-cast-checks=disabled -Dglib-asserts=disabled -Dglib-checks=disabled
