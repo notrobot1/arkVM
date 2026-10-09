@@ -24,10 +24,23 @@
  * части. Иначе GIO выгрузит нас сразу после просмотра каталога, а
  * зарегистрированные виды будут указывать в освобождённую память.
  *
+ * Кадры движок может отдавать двумя способами: разделяемым буфером
+ * (dma-buf) или через общую память. Первый быстрее: картинка не
+ * переписывается вовсе, она просто становится полотном. Но движок выберет
+ * его только если площадка объявит, какие виды кадров принимает и через
+ * какое устройство отрисовки они разделяются. Этим заняты обязанности
+ * get_drm_device и get_preferred_buffer_formats ниже.
+ *
+ * Ничего не зашито: узел отрисовки спрашивается у самого EGL, перечень
+ * видов — тоже у него. Если нужных расширений нет, площадка молчит, и
+ * движок сам отступает к общей памяти — тот путь никуда не делся.
+ *
  * Переменные окружения:
  *   WPE_OHOS_SURFACE_ID  номер поверхности; если не задан, окно заводится само
  *   WPE_OHOS_WIDTH       ширина окна, по умолчанию 1920
  *   WPE_OHOS_HEIGHT      высота окна, по умолчанию 1080
+ *   WPE_OHOS_DRM_DEVICE  узел отрисовки вручную, если угадать не вышло
+ *   WPE_OHOS_NO_DMABUF   если задана — не объявлять разделяемые буферы
  *   WPE_OHOS_DEBUG       если задана — говорить о каждом шаге
  */
 
@@ -43,12 +56,36 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <dlfcn.h>
 
 #define OHOS_LOG(...) do { if (g_getenv("WPE_OHOS_DEBUG")) g_printerr(__VA_ARGS__); } while (0)
 
 // Этого вызова нет в обычных объявлениях GLES2 — берём у EGL по имени.
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC imageTargetTexture2D;
+
+// Значения из расширений EGL. Объявляем сами: в заголовках, собранных без
+// этих расширений, их может не оказаться, а числа закреплены навсегда.
+#ifndef EGL_DEVICE_EXT
+#define EGL_DEVICE_EXT 0x322C
+typedef void* EGLDeviceEXT;
+#endif
+#ifndef EGL_DRM_DEVICE_FILE_EXT
+#define EGL_DRM_DEVICE_FILE_EXT 0x3233
+#endif
+#ifndef EGL_DRM_RENDER_NODE_FILE_EXT
+#define EGL_DRM_RENDER_NODE_FILE_EXT 0x3377
+#endif
+
+// Обозначения видов кадров. Четырёхбуквенные коды из drm_fourcc.h; заголовка
+// libdrm у нас нет, а коды эти неизменны.
+#define OHOS_FOURCC(a, b, c, d) \
+    ((guint32)(a) | ((guint32)(b) << 8) | ((guint32)(c) << 16) | ((guint32)(d) << 24))
+#define OHOS_FORMAT_ARGB8888 OHOS_FOURCC('A', 'R', '2', '4')
+#define OHOS_FORMAT_XRGB8888 OHOS_FOURCC('X', 'R', '2', '4')
+#define OHOS_FORMAT_ABGR8888 OHOS_FOURCC('A', 'B', '2', '4')
+#define OHOS_FORMAT_XBGR8888 OHOS_FOURCC('X', 'B', '2', '4')
+#define OHOS_MODIFIER_INVALID ((guint64)0x00ffffffffffffffULL)
 
 // ============================================================================
 //  Объявление видов
@@ -71,7 +108,15 @@ struct _WPEDisplayOHOS {
     OHNativeWindow* window;
     int width;
     int height;
+    // Растёт при каждом изменении размера. Отрисовка сверяется с ним и
+    // пересоздаёт поверхность EGL: сама она за размером буфера не следует.
+    guint sizeSerial;
     WPEKeymap* keymap;
+
+    // Про разделяемые буферы. Определяется один раз, при первом вопросе.
+    gboolean dmaBufChecked;
+    WPEDRMDevice* drmDevice;
+    WPEBufferFormats* bufferFormats;
 };
 G_DEFINE_DYNAMIC_TYPE(WPEDisplayOHOS, wpe_display_ohos, WPE_TYPE_DISPLAY)
 
@@ -85,6 +130,8 @@ struct _WPEViewOHOS {
 
     EGLSurface eglSurface;
     EGLContext eglContext;
+    EGLConfig eglConfig;      // нужен, чтобы пересоздать поверхность
+    guint surfaceSerial;      // с каким размером она создана
     GLuint program;
     GLuint texture;
     GLint swapLocation;
@@ -157,6 +204,213 @@ static gpointer wpeDisplayOHOSGetEGLDisplay(WPEDisplay* display, GError** error)
     return eglDisplay;
 }
 
+// ============================================================================
+//  Разделяемые буферы: что мы умеем принимать
+// ============================================================================
+
+// Узел отрисовки спрашиваем у EGL. Так выходит правильно на любой машине:
+// то же устройство, на котором EGL и работает, а не первое попавшееся.
+static char* queryRenderNodeFromEGL(EGLDisplay eglDisplay)
+{
+    typedef EGLBoolean (*QueryDisplayAttribFn)(EGLDisplay, EGLint, EGLAttrib*);
+    typedef const char* (*QueryDeviceStringFn)(EGLDeviceEXT, EGLint);
+
+    QueryDisplayAttribFn queryDisplayAttrib =
+        (QueryDisplayAttribFn)eglGetProcAddress("eglQueryDisplayAttribEXT");
+    QueryDeviceStringFn queryDeviceString =
+        (QueryDeviceStringFn)eglGetProcAddress("eglQueryDeviceStringEXT");
+    if (!queryDisplayAttrib || !queryDeviceString)
+        return nullptr;
+
+    EGLAttrib attribute = 0;
+    if (!queryDisplayAttrib(eglDisplay, EGL_DEVICE_EXT, &attribute))
+        return nullptr;
+
+    EGLDeviceEXT device = (EGLDeviceEXT)attribute;
+    const char* node = queryDeviceString(device, EGL_DRM_RENDER_NODE_FILE_EXT);
+    if (!node || !*node)
+        node = queryDeviceString(device, EGL_DRM_DEVICE_FILE_EXT);
+    return (node && *node) ? g_strdup(node) : nullptr;
+}
+
+// Запасной путь, если EGL о себе не рассказывает: берём первый узел
+// отрисовки из каталога устройств. Перебор по именам, без libdrm.
+static char* findAnyRenderNode(void)
+{
+    DIR* dir = opendir("/dev/dri");
+    if (!dir)
+        return nullptr;
+
+    char* found = nullptr;
+    while (struct dirent* entry = readdir(dir)) {
+        if (!g_str_has_prefix(entry->d_name, "renderD"))
+            continue;
+        found = g_build_filename("/dev/dri", entry->d_name, nullptr);
+        break;
+    }
+    closedir(dir);
+    return found;
+}
+
+// Виды кадров, которые мы в самом деле умеем натянуть на полотно.
+// Остальное объявлять нечестно: движок отдаст, а показать не выйдет.
+static gboolean isFormatWeCanDraw(guint32 fourcc)
+{
+    return fourcc == OHOS_FORMAT_ARGB8888 || fourcc == OHOS_FORMAT_XRGB8888
+        || fourcc == OHOS_FORMAT_ABGR8888 || fourcc == OHOS_FORMAT_XBGR8888;
+}
+
+// Перечень собираем из ответов самого EGL. Если расширения с признаками
+// размещения нет — объявляем те же виды с признаком «как получится»:
+// это и есть обычное последовательное размещение.
+static WPEBufferFormats* buildBufferFormats(EGLDisplay eglDisplay, WPEDRMDevice* device)
+{
+    typedef EGLBoolean (*QueryFormatsFn)(EGLDisplay, EGLint, EGLint*, EGLint*);
+    typedef EGLBoolean (*QueryModifiersFn)(EGLDisplay, EGLint, EGLint, EGLuint64KHR*,
+                                           EGLBoolean*, EGLint*);
+
+    QueryFormatsFn queryFormats = (QueryFormatsFn)eglGetProcAddress("eglQueryDmaBufFormatsEXT");
+    QueryModifiersFn queryModifiers =
+        (QueryModifiersFn)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+
+    WPEBufferFormatsBuilder* builder = wpe_buffer_formats_builder_new(device);
+    wpe_buffer_formats_builder_append_group(builder, device, WPE_BUFFER_FORMAT_USAGE_RENDERING);
+
+    guint declared = 0;
+
+    if (queryFormats) {
+        EGLint count = 0;
+        if (queryFormats(eglDisplay, 0, nullptr, &count) && count > 0) {
+            EGLint* formats = g_new0(EGLint, count);
+            if (queryFormats(eglDisplay, count, formats, &count)) {
+                for (EGLint i = 0; i < count; i++) {
+                    guint32 fourcc = (guint32)formats[i];
+                    if (!isFormatWeCanDraw(fourcc))
+                        continue;
+
+                    gboolean addedAny = FALSE;
+                    if (queryModifiers) {
+                        EGLint modifierCount = 0;
+                        if (queryModifiers(eglDisplay, formats[i], 0, nullptr, nullptr,
+                                           &modifierCount) && modifierCount > 0) {
+                            EGLuint64KHR* modifiers = g_new0(EGLuint64KHR, modifierCount);
+                            EGLBoolean* external = g_new0(EGLBoolean, modifierCount);
+                            if (queryModifiers(eglDisplay, formats[i], modifierCount, modifiers,
+                                               external, &modifierCount)) {
+                                for (EGLint m = 0; m < modifierCount; m++) {
+                                    // Размещения, требующие особого рода полотна,
+                                    // пропускаем: рисуем обычным.
+                                    if (external[m])
+                                        continue;
+                                    wpe_buffer_formats_builder_append_format(builder, fourcc,
+                                        (guint64)modifiers[m]);
+                                    addedAny = TRUE;
+                                    declared++;
+                                }
+                            }
+                            g_free(modifiers);
+                            g_free(external);
+                        }
+                    }
+
+                    // Без перечня размещений — хотя бы «как получится».
+                    if (!addedAny) {
+                        wpe_buffer_formats_builder_append_format(builder, fourcc,
+                            OHOS_MODIFIER_INVALID);
+                        declared++;
+                    }
+                }
+            }
+            g_free(formats);
+        }
+    }
+
+    // EGL промолчал — объявим пару самых обиходных видов. Если он их не
+    // примет, движок получит отказ при разборе кадра и вернётся к общей
+    // памяти; ничего не сломается.
+    if (!declared) {
+        wpe_buffer_formats_builder_append_format(builder, OHOS_FORMAT_ARGB8888,
+            OHOS_MODIFIER_INVALID);
+        wpe_buffer_formats_builder_append_format(builder, OHOS_FORMAT_XRGB8888,
+            OHOS_MODIFIER_INVALID);
+        declared = 2;
+    }
+
+    OHOS_LOG("WPEPlatformOHOS: объявлено видов кадров: %u\n", declared);
+    return wpe_buffer_formats_builder_end(builder);
+}
+
+// Общая подготовка: оба вопроса движка (устройство и виды кадров) отвечают
+// из одного и того же разбора, и делается он однажды.
+static void ensureDMABufSupport(WPEDisplayOHOS* self)
+{
+    if (self->dmaBufChecked)
+        return;
+    self->dmaBufChecked = TRUE;
+
+    if (g_getenv("WPE_OHOS_NO_DMABUF")) {
+        OHOS_LOG("WPEPlatformOHOS: разделяемые буферы отключены вручную\n");
+        return;
+    }
+
+    GError* error = nullptr;
+    EGLDisplay eglDisplay = (EGLDisplay)wpeDisplayOHOSGetEGLDisplay(WPE_DISPLAY(self), &error);
+    if (!eglDisplay) {
+        OHOS_LOG("WPEPlatformOHOS: EGL недоступен (%s), остаёмся на общей памяти\n",
+            error ? error->message : "без пояснения");
+        g_clear_error(&error);
+        return;
+    }
+
+    // Без этого расширения кадр из разделяемого буфера не превратить
+    // в картинку — объявлять их нечего.
+    const char* extensions = eglQueryString(eglDisplay, EGL_EXTENSIONS);
+    if (!extensions || !strstr(extensions, "EGL_EXT_image_dma_buf_import")) {
+        OHOS_LOG("WPEPlatformOHOS: EGL не умеет принимать разделяемые буферы\n");
+        return;
+    }
+
+    char* node = nullptr;
+    const char* forced = g_getenv("WPE_OHOS_DRM_DEVICE");
+    if (forced && *forced)
+        node = g_strdup(forced);
+    if (!node)
+        node = queryRenderNodeFromEGL(eglDisplay);
+    if (!node)
+        node = findAnyRenderNode();
+    if (!node) {
+        OHOS_LOG("WPEPlatformOHOS: узел отрисовки не найден, остаёмся на общей памяти\n");
+        return;
+    }
+
+    // Первый довод — основной узел, второй — узел отрисовки. Основной нам
+    // не нужен и не всегда доступен приложению; движку достаточно второго.
+    self->drmDevice = wpe_drm_device_new(nullptr, node);
+    if (!self->drmDevice) {
+        OHOS_LOG("WPEPlatformOHOS: устройство отрисовки %s не принято\n", node);
+        g_free(node);
+        return;
+    }
+
+    self->bufferFormats = buildBufferFormats(eglDisplay, self->drmDevice);
+    OHOS_LOG("WPEPlatformOHOS: разделяемые буферы через %s\n", node);
+    g_free(node);
+}
+
+static WPEDRMDevice* wpeDisplayOHOSGetDRMDevice(WPEDisplay* display)
+{
+    WPEDisplayOHOS* self = WPE_DISPLAY_OHOS(display);
+    ensureDMABufSupport(self);
+    return self->drmDevice;
+}
+
+static WPEBufferFormats* wpeDisplayOHOSGetPreferredBufferFormats(WPEDisplay* display)
+{
+    WPEDisplayOHOS* self = WPE_DISPLAY_OHOS(display);
+    ensureDMABufSupport(self);
+    return self->bufferFormats;
+}
+
 // Заводим окно сами, через вспомогательную библиотеку из дерева OpenHarmony.
 // Прямо отсюда к службе отрисовки не дотянуться: площадка собирается лишь
 // по пакету для разработчиков. Подгружаем по имени.
@@ -165,7 +419,11 @@ static gboolean createOwnWindow(WPEDisplayOHOS* self, GError** error)
     typedef guint64 (*CreateFn)(int*, int*);
 
     OHOS_LOG("WPEPlatformOHOS: подгружаю libarkvm_ohos_window.z.so\n");
-    void* helper = dlopen("libarkvm_ohos_window.z.so", RTLD_NOW | RTLD_GLOBAL);
+    // Именно без RTLD_GLOBAL. Помощник тянет за собой части ArkUI, собранные
+    // со своей однодельной библиотекой (libc++_shared), а у нас уже открыта
+    // своя (libc++.so.1). При общей видимости их имена сталкиваются, и
+    // предпусковая часть skia падает ещё до первого нашего вызова.
+    void* helper = dlopen("libarkvm_ohos_window.z.so", RTLD_NOW);
     if (!helper) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
             "не удалось подгрузить libarkvm_ohos_window.z.so: %s", dlerror());
@@ -255,6 +513,11 @@ static void wpeDisplayOHOSDispose(GObject* object)
 {
     WPEDisplayOHOS* self = WPE_DISPLAY_OHOS(object);
     g_clear_object(&self->keymap);
+    g_clear_object(&self->bufferFormats);
+    if (self->drmDevice) {
+        wpe_drm_device_unref(self->drmDevice);
+        self->drmDevice = nullptr;
+    }
     if (self->window) {
         OH_NativeWindow_DestroyNativeWindow(self->window);
         self->window = nullptr;
@@ -279,6 +542,10 @@ static void wpe_display_ohos_class_init(WPEDisplayOHOSClass* klass)
     displayClass->create_toplevel = wpeDisplayOHOSCreateToplevel;
     displayClass->get_egl_display = wpeDisplayOHOSGetEGLDisplay;
     displayClass->get_keymap = wpeDisplayOHOSGetKeymap;
+    // Без этих двух движок считает, что разделяемые буферы нам не нужны,
+    // и отдаёт кадры через общую память.
+    displayClass->get_drm_device = wpeDisplayOHOSGetDRMDevice;
+    displayClass->get_preferred_buffer_formats = wpeDisplayOHOSGetPreferredBufferFormats;
 }
 
 // Отчуждаемый вид обязан уметь прибираться, даже если прибирать нечего.
@@ -290,12 +557,40 @@ static void wpe_display_ohos_class_finalize(WPEDisplayOHOSClass*)
 //  Верхний уровень: обязанности
 // ============================================================================
 
+static gboolean viewResizeHelper(WPEToplevel*, WPEView* view, gpointer data)
+{
+    const int* size = (const int*)data;
+    wpe_view_resized(view, size[0], size[1]);
+    return FALSE; // продолжать обход
+}
+
 static gboolean wpeToplevelOHOSResize(WPEToplevel* toplevel, int width, int height)
 {
     WPEDisplayOHOS* display = WPE_DISPLAY_OHOS(wpe_toplevel_get_display(toplevel));
+    if (width <= 0 || height <= 0)
+        return FALSE;
+    if (width == display->width && height == display->height)
+        return TRUE;
+
+    // Новый размер буфера окна.
     if (display->window)
         OH_NativeWindow_NativeWindowHandleOpt(display->window, SET_BUFFER_GEOMETRY, width, height);
+
+    // Это читает отрисовка при задании области рисования.
+    display->width = width;
+    display->height = height;
+
+    // Поверхность EGL за размером буфера сама не следует: её надо
+    // пересоздать. Отрисовка заметит расхождение по этому счётчику.
+    display->sizeSerial++;
+
     wpe_toplevel_resized(toplevel, width, height);
+
+    // Движку надо сказать отдельно: сам он размер окон не пересчитывает.
+    int size[2] = { width, height };
+    wpe_toplevel_foreach_view(toplevel, viewResizeHelper, size);
+
+    OHOS_LOG("WPEPlatformOHOS: размер стал %dx%d\n", width, height);
     return TRUE;
 }
 
@@ -340,6 +635,8 @@ static gboolean viewEnsureGL(WPEViewOHOS* self, GError** error)
         return FALSE;
     }
 
+    self->eglConfig = config;
+    self->surfaceSerial = display->sizeSerial;
     self->eglSurface = eglCreateWindowSurface(eglDisplay, config,
         (EGLNativeWindowType)display->window, nullptr);
     if (self->eglSurface == EGL_NO_SURFACE) {
@@ -410,6 +707,42 @@ static gboolean viewEnsureGL(WPEViewOHOS* self, GError** error)
     return TRUE;
 }
 
+// Размер окна изменился — поверхность EGL создана под прежний буфер и
+// рисовать в неё больше нельзя: по краям останется пустота, а при сжатии
+// картинку сплющит. Пересоздаём.
+static gboolean viewSyncSurfaceSize(WPEViewOHOS* self, GError** error)
+{
+    WPEDisplayOHOS* display = WPE_DISPLAY_OHOS(wpe_view_get_display(WPE_VIEW(self)));
+    if (self->surfaceSerial == display->sizeSerial)
+        return TRUE;
+
+    EGLDisplay eglDisplay = display->eglDisplay;
+    eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (self->eglSurface != EGL_NO_SURFACE) {
+        eglDestroySurface(eglDisplay, self->eglSurface);
+        self->eglSurface = EGL_NO_SURFACE;
+    }
+
+    self->eglSurface = eglCreateWindowSurface(eglDisplay, self->eglConfig,
+        (EGLNativeWindowType)display->window, nullptr);
+    if (self->eglSurface == EGL_NO_SURFACE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "оконная поверхность EGL не пересоздалась: 0x%04x", eglGetError());
+        return FALSE;
+    }
+
+    if (!eglMakeCurrent(eglDisplay, self->eglSurface, self->eglSurface, self->eglContext)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "окружение отрисовки не выбралось после изменения размера: 0x%04x", eglGetError());
+        return FALSE;
+    }
+
+    self->surfaceSerial = display->sizeSerial;
+    OHOS_LOG("WPEPlatformOHOS: поверхность пересоздана под %dx%d\n",
+        display->width, display->height);
+    return TRUE;
+}
+
 static gboolean wpeViewOHOSRenderBuffer(WPEView* view, WPEBuffer* buffer,
     const WPERectangle*, guint, GError** error)
 {
@@ -417,6 +750,8 @@ static gboolean wpeViewOHOSRenderBuffer(WPEView* view, WPEBuffer* buffer,
     WPEDisplayOHOS* display = WPE_DISPLAY_OHOS(wpe_view_get_display(view));
 
     if (!viewEnsureGL(self, error))
+        return FALSE;
+    if (!viewSyncSurfaceSize(self, error))
         return FALSE;
 
     const int width = wpe_buffer_get_width(buffer);
@@ -435,6 +770,16 @@ static gboolean wpeViewOHOSRenderBuffer(WPEView* view, WPEBuffer* buffer,
     float swapRB = 0.0f;
     GError* imageError = nullptr;
     EGLImage image = (EGLImage)wpe_buffer_import_to_egl_image(buffer, &imageError);
+
+    // Один раз скажем, каким путём пошло: это первое, что хочется знать,
+    // когда отрисовка кажется медленной.
+    static gboolean pathReported = FALSE;
+    if (!pathReported) {
+        pathReported = TRUE;
+        OHOS_LOG("WPEPlatformOHOS: кадры идут %s\n",
+            image ? "разделяемым буфером" : "через общую память");
+    }
+
     if (image) {
         imageTargetTexture2D(GL_TEXTURE_2D, (GLeglImageOES)image);
     } else {
