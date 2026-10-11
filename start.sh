@@ -43,6 +43,64 @@ UID_DDATA=3012        # служба распределённых данных
 
 
 
+
+
+# Настройка звукового распорядителя. В этот продукт положили описание
+# старого образца: у путей нет перечня устройств (supportDevices), и новый
+# разбиратель оставляет выход без единого пути — звук не запускается вовсе.
+#
+# Читается сперва /chip_prod, потом /vendor: первый перебивает второй,
+# поэтому кладём в оба.
+install_audio_policy() {
+    src="$SCRIPT_DIR/../vendor/hihope/2in1_core_system/hals/audio/config/arm64/audio_policy_config.xml"
+    [ -f "$src" ] || { echo "нет $src"; return 1; }
+    for dst in /chip_prod/etc/audio/audio_policy_config.xml \
+               /vendor/etc/audio/audio_policy_config.xml; do
+        grep -q "supportDevices" "$dst" 2>/dev/null && continue
+        install -Dm644 "$src" "$dst"
+    done
+}
+
+
+
+
+# Свод вызовов к звуку. В этом продукте не собирается, берём из сборочного
+# дерева — как и часть ArkUI для XComponent.
+install_ohaudio() {
+    src="$SCRIPT_DIR/../out/arkvm/multimedia/audio_framework/libohaudio.so"
+    [ -f "$src" ] || { echo "нет $src — соберите цель ohaudio"; return 1; }
+    install -Dm644 "$src" /system/lib64/libohaudio.so
+    ln -sfn /system/lib64/libohaudio.so /system/lib64/ndk/libohaudio.so
+}
+
+# Разрешение имён: netsysnative поднимается без настроек, их надо задать
+# после его запуска. Иначе любой запрос упирается в «нет настроек
+# для сети по умолчанию».
+# Разрешение имён: netsysnative поднимается без настроек, их надо задать
+# после его запуска. Иначе любой запрос упирается в «нет настроек
+# для сети по умолчанию».
+install_netsys_setdns() {
+    install -Dm755 \
+        "$SCRIPT_DIR/../out/arkvm/communication/netmanager_ext/arkvm_netsys_setdns" \
+        /system/bin/netsys_setdns
+}
+
+setup_dns() {
+    /system/bin/netsys_setdns || echo "настройки разрешения имён не применились"
+}
+
+
+
+# Внутри песочницы приложения /lib — это ссылка на /system/lib. Без этого
+# каталога не находится загрузчик, и ни одна наша программа там не запустится.
+install_sandbox_loader() {
+    mkdir -p /system/lib
+    ln -f /lib/ld-musl-x86_64.so.1 /system/lib/ld-musl-x86_64.so.1 2>/dev/null \
+        || cp -a /lib/ld-musl-x86_64.so.1 /system/lib/ld-musl-x86_64.so.1
+}
+
+
+
 # Часть ArkUI для XComponent. В этой сборке продукта её не кладут в образ —
 # есть только заглушка из набора для разработчиков, а настоящая библиотека
 # остаётся в каталоге сборки. Берём её оттуда.
@@ -321,6 +379,12 @@ mkdir -p /data/service/el1/public/netsysnative
 
 install_ace_ndk
 install_wpe_namespace
+#setup_dns
+
+
+mkdir -p /system/share
+cp -a /usr/share/mime /system/share/
+ls /system/share/mime/mime.cache
 
 
 }
@@ -1048,6 +1112,10 @@ EOF
         /system/lib64/platformsdk/libace_ndk.z.so
 
 
+install_sandbox_loader
+install_netsys_setdns
+install_ohaudio
+install_audio_policy
 
 
     echo "готово"
@@ -1448,6 +1516,10 @@ start_sa inputmethod_service 3703
 start_sa screenlock_server 3704
 start_sa useriam 901
 
+
+gdb /system/bin/appspawn /tmp/core.m.arkvm.browser.* -batch -ex "thread apply all bt" 2>&1 | head -60
+
+
 ( cd / && exec "$BIN/appspawn" -mode appspawn \
     --process-name com.ohos.appspawn.startup --start-flags daemon --type standard \
     --sandbox-switch on --bundle-name com.ohos.appspawn.startup --app-operate-type operate \
@@ -1587,5 +1659,7 @@ echo "готово, реестр:"
 echo
 echo "признаки готовности:"
 "$BIN/param" get | grep -iE "bms.main.bundles.ready|wms.fullscreen.ready"
+setup_dns
+
 echo
 echo "журнал:  sudo env LD_LIBRARY_PATH=$LIB $BIN/hilog"
