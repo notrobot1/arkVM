@@ -1,0 +1,26 @@
+Слой звука через ALSA: недописанная строка в выборе сцены для ввода.
+
+drivers/peripheral/audio/supportlibs/alsa_adapter/src/vendor_capture.c
+присваивает captureIns->descPins значение несуществующего descPins —
+исходник просто не собирается:
+
+    error: use of undeclared identifier 'descPins'
+
+У вывода (vendor_render.c, та же строка 54) написано полностью:
+
+    renderIns->descPins = handleData->renderMode.hwInfo.deviceDescript.pins;
+
+Делаем так же, только через captureMode. Слой через ALSA собирают редко
+(drivers_peripheral_audio_feature_alsa_lib по умолчанию выключен), поэтому
+недописка и дожила до выпуска.
+
+--- a/drivers/peripheral/audio/supportlibs/alsa_adapter/src/vendor_capture.c
++++ b/drivers/peripheral/audio/supportlibs/alsa_adapter/src/vendor_capture.c
+@@ -51,7 +51,7 @@
+ static int32_t CaptureSelectSceneImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
+ {
+     CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
+-    captureIns->descPins = descPins;
++    captureIns->descPins = handleData->captureMode.hwInfo.deviceDescript.pins;
+     return HDF_SUCCESS;
+ }
