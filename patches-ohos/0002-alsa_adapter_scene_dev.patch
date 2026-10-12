@@ -1,3 +1,38 @@
+
+Слой звука через ALSA: нет подпрограмм выбора устройства смесителя.
+
+alsa_snd_render.c и alsa_snd_capture.c вызывают RenderGetSceneDev и
+CaptureGetSceneDev. Обе объявлены в заголовках (alsa_snd_render.h,
+alsa_snd_capture.h), обе вызываются при создании потока — и ни одна нигде
+не определена. Сборка разваливается на связывании:
+
+    ld.lld: error: undefined symbol: CaptureGetSceneDev
+    >>> referenced by alsa_snd_capture.c:448
+
+Почему это дожило до выпуска: слой через ALSA собирают редко. Переключатель
+drivers_peripheral_audio_feature_alsa_lib по умолчанию выключен, и ни один
+из продуктов в дереве его не включает — все идут через драйвер в ядре
+(adm_adapter). Нам же нужен именно он: ядро у нас обычное, своего драйвера
+OpenHarmony в нём нет, а звуковая карта видна через ALSA.
+
+Что возвращать. Значение — номер устройства смесителя для сцены (разговор,
+музыка, звонок), и -1 означает «без особого устройства». Вызывающий код
+сам приводит к нему всё, что не укладывается в пределы:
+
+    dev = RenderGetSceneDev(scene);
+    if (dev > MIXER_CTL_MAX_NUM || dev < -1) {
+        dev = -1;
+    }
+    ret = SndSaveCardListInfo(SND_PCM_STREAM_RENDER, dev);
+
+На обычной звуковой карте отдельных путей смесителя под сцены нет: всё
+идёт одним выходом. Поэтому -1 — не заглушка, а верный ответ для такого
+железа. Если когда-нибудь появится устройство с раздельными путями, здесь
+и нужно будет описать их выбор.
+
+Проверено: после этой правки слой собирается, audio_host заводит
+переходник primary, и звук доходит до карты.
+
 diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
 index 82b046780..3ed7af692 100755
 --- a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
