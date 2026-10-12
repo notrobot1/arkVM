@@ -1,0 +1,9 @@
+{
+    "adapters": [
+        {
+            "name": "primary",
+            "cardId": 0,
+            "cardName": "PCH"
+        }
+    ]
+}
