@@ -1,0 +1,44 @@
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
+index 82b046780..3ed7af692 100755
+--- a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
+@@ -932,3 +932,13 @@ static void RegisterCaptureImpl(struct AlsaCapture *captureIns)
+ 
+     captureIns->SetParams = CaptureSetHwParamsImpl;
+ }
++
++/*
++ * Номер устройства смесителя для сцены — для ввода.
++ * Пояснение см. в alsa_snd_render.c: то же самое, только для записи.
++ */
++int32_t CaptureGetSceneDev(enum AudioCategory scene)
++{
++    (void)scene;
++    return -1;
++}
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
+index 52956e97b..be698e6fc 100755
+--- a/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
+@@ -967,3 +967,21 @@ static void RegisterRenderImpl(struct AlsaRender *renderIns)
+     renderIns->UpdateRouter = RenderUpdateRouterImpl;
+ }
+ 
++
++/*
++ * Номер устройства смесителя для сцены.
++ *
++ * В выпуске эта подпрограмма объявлена в заголовке и вызывается, но нигде
++ * не определена — слой через ALSA собирают редко, и недописка дожила до
++ * выпуска.
++ *
++ * На обычной звуковой карте отдельных путей смесителя под сцены нет:
++ * разговор, музыка и звонок идут одним и тем же выходом. Возвращаем -1 —
++ * «без особого устройства». Это ровно то значение, которое вызывающий код
++ * подставляет сам, когда полученное не укладывается в пределы.
++ */
++int32_t RenderGetSceneDev(enum AudioCategory scene)
++{
++    (void)scene;
++    return -1;
++}
