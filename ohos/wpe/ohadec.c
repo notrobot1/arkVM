@@ -269,7 +269,7 @@ static gboolean startCodec(GstOhADec* self, GstCaps* caps)
     OH_AVFormat* format = OH_AVFormat_Create();
     OH_AVFormat_SetIntValue(format, OH_MD_KEY_AUD_SAMPLE_RATE, rate);
     OH_AVFormat_SetIntValue(format, OH_MD_KEY_AUD_CHANNEL_COUNT, channels);
-    OH_AVFormat_SetIntValue(format, OH_MD_KEY_AUD_SAMPLE_FORMAT, SAMPLE_S16LE);
+    OH_AVFormat_SetIntValue(format, OH_MD_KEY_AUDIO_SAMPLE_FORMAT, SAMPLE_S16LE);
 
     if (g_strcmp0(mime, OH_AVCODEC_MIMETYPE_AUDIO_AAC) == 0) {
         const gchar* streamFormat = gst_structure_get_string(s, "stream-format");
@@ -352,7 +352,7 @@ static void readOutputFormat(GstOhADec* self)
     int32_t rate = 0, channels = 0, sampleFormat = -1;
     OH_AVFormat_GetIntValue(format, OH_MD_KEY_AUD_SAMPLE_RATE, &rate);
     OH_AVFormat_GetIntValue(format, OH_MD_KEY_AUD_CHANNEL_COUNT, &channels);
-    OH_AVFormat_GetIntValue(format, OH_MD_KEY_AUD_SAMPLE_FORMAT, &sampleFormat);
+    OH_AVFormat_GetIntValue(format, OH_MD_KEY_AUDIO_SAMPLE_FORMAT, &sampleFormat);
 
     if (rate > 0) self->rate = rate;
     if (channels > 0) self->channels = channels;
@@ -476,14 +476,49 @@ static gboolean gstOhADecSetFormat(GstAudioDecoder* decoder, GstCaps* caps)
     return startCodec(self, caps);
 }
 
+/* Подбить остатки: шлём пустой кусок с пометкой конца и ждём, пока служба
+   отдаст накопленное. Зовётся, когда GStreamer приносит пустой кусок — так
+   он сообщает, что подача кончилась. Отдельной обязанности «подбей» у
+   расшифровщика звука нет, в отличие от расшифровщика картинки. */
+static void drainCodec(GstOhADec* self)
+{
+    if (!self->codec || !self->started)
+        return;
+
+    Slot* slot = takeFreeInput(self);
+    if (!slot)
+        return;
+
+    OH_AVCodecBufferAttr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.flags = AVCODEC_BUFFER_FLAGS_EOS;
+    OH_AVBuffer_SetBufferAttr(slot->buffer, &attr);
+    OH_AudioCodec_PushInputBuffer(self->codec, slot->index);
+    g_free(slot);
+
+    gint64 deadline = g_get_monotonic_time() + 2 * G_USEC_PER_SEC;
+    g_mutex_lock(&self->lock);
+    while (!self->sawEos && !self->flushing) {
+        if (!g_cond_wait_until(&self->cond, &self->lock, deadline)) {
+            GST_WARNING_OBJECT(self, "конца потока не дождались");
+            break;
+        }
+    }
+    g_mutex_unlock(&self->lock);
+}
+
 static GstFlowReturn gstOhADecHandleFrame(GstAudioDecoder* decoder,
                                           GstBuffer* buffer)
 {
     GstOhADec* self = GST_OHADEC(decoder);
 
-    /* Пустой кусок означает «подбей остатки» — у нас это делает finish. */
-    if (!buffer)
+    /* Пустой кусок означает «подача кончилась, подбей остатки». */
+    if (!buffer) {
+        GST_AUDIO_DECODER_STREAM_UNLOCK(decoder);
+        drainCodec(self);
+        GST_AUDIO_DECODER_STREAM_LOCK(decoder);
         return GST_FLOW_OK;
+    }
 
     if (!self->codec || !self->started)
         return GST_FLOW_NOT_NEGOTIATED;
@@ -535,40 +570,6 @@ static GstFlowReturn gstOhADecHandleFrame(GstAudioDecoder* decoder,
     }
 
     return self->lastFlow;
-}
-
-/* Конец потока: шлём пустой кусок с пометкой и ждём, пока служба отдаст
-   накопленное. У звука задержка меньше, чем у картинки, но она есть. */
-static void gstOhADecFinish(GstAudioDecoder* decoder)
-{
-    GstOhADec* self = GST_OHADEC(decoder);
-
-    if (!self->codec || !self->started)
-        return;
-
-    GST_AUDIO_DECODER_STREAM_UNLOCK(decoder);
-
-    Slot* slot = takeFreeInput(self);
-    if (slot) {
-        OH_AVCodecBufferAttr attr;
-        memset(&attr, 0, sizeof(attr));
-        attr.flags = AVCODEC_BUFFER_FLAGS_EOS;
-        OH_AVBuffer_SetBufferAttr(slot->buffer, &attr);
-        OH_AudioCodec_PushInputBuffer(self->codec, slot->index);
-        g_free(slot);
-
-        gint64 deadline = g_get_monotonic_time() + 2 * G_USEC_PER_SEC;
-        g_mutex_lock(&self->lock);
-        while (!self->sawEos && !self->flushing) {
-            if (!g_cond_wait_until(&self->cond, &self->lock, deadline)) {
-                GST_WARNING_OBJECT(self, "конца потока не дождались");
-                break;
-            }
-        }
-        g_mutex_unlock(&self->lock);
-    }
-
-    GST_AUDIO_DECODER_STREAM_LOCK(decoder);
 }
 
 static void gstOhADecFlush(GstAudioDecoder* decoder, gboolean hard)
@@ -649,7 +650,6 @@ static void gst_ohadec_class_init(GstOhADecClass* klass)
     decoderClass->set_format = gstOhADecSetFormat;
     decoderClass->handle_frame = gstOhADecHandleFrame;
     decoderClass->flush = gstOhADecFlush;
-    decoderClass->finish = gstOhADecFinish;
 }
 
 // ============================================================================
